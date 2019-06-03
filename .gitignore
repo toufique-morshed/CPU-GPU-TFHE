@@ -1,0 +1,17 @@
+*.o
+*.key
+*.obj
+main
+*.log
+*.csv
+*.txt
+*.data
+*.key
+
+*.i
+*.ii
+*.gpu
+*.ptx
+*.cubin
+*.fatbin
+
