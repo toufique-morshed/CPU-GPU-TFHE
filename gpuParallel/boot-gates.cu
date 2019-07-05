@@ -14,14 +14,62 @@
 #include "lwebootstrappingkey.h"
 #include "tfhe.h"
 #include <fstream>
+#include <cstdint>
 
 
 using namespace std;
+#define H2D cudaMemcpyHostToDevice
+#define D2D cudaMemcpyDeviceToDevice
+#define D2H cudaMemcpyDeviceToHost
 
 #else
 #undef EXPORT
 #define EXPORT static
 #endif
+
+#define CUDA_ERROR_CHECK
+
+#define CudaSafeCall( err ) __cudaSafeCall( err, __FILE__, __LINE__ )
+#define CudaCheckError()    __cudaCheckError( __FILE__, __LINE__ )
+
+inline void __cudaSafeCall( cudaError err, const char *file, const int line )
+{
+#ifdef CUDA_ERROR_CHECK
+    if ( cudaSuccess != err )
+    {
+        fprintf( stderr, "cudaSafeCall() failed at %s:%i : %s\n",
+                 file, line, cudaGetErrorString( err ) );
+        exit( -1 );
+    }
+#endif
+
+    return;
+}
+
+inline void __cudaCheckError( const char *file, const int line )
+{
+#ifdef CUDA_ERROR_CHECK
+    cudaError err = cudaGetLastError();
+    if ( cudaSuccess != err )
+    {
+        fprintf( stderr, "cudaCheckError() failed at %s:%i : %s\n",
+                 file, line, cudaGetErrorString( err ) );
+        exit( -1 );
+    }
+
+    // More careful checking. However, this will affect performance.
+    // Comment away if needed.
+    err = cudaDeviceSynchronize();
+    if( cudaSuccess != err )
+    {
+        fprintf( stderr, "cudaCheckError() with sync failed at %s:%i : %s\n",
+                 file, line, cudaGetErrorString( err ) );
+        exit( -1 );
+    }
+#endif
+
+    return;
+}
 
 
 #define cudaCheckErrors(msg) \
@@ -564,13 +612,11 @@ EXPORT void bootsAND_16(LweSample_16 *result, const LweSample_16 *ca, const LweS
     }
 
     vecAdd<<<gridSize, BLOCKSIZE>>>(temp_result->a, ca->a, cb->a, in_out_params->n * bitSize);
-//    cudaDeviceSynchronize();
-//    cudaCheckErrors("kernel fail");
 
     for (int i = 0; i < bitSize; ++i) {
         temp_result->b[i] += (ca->b[i] + cb->b[i]);
 //        cout << temp_result->b[i] << " ";
-        temp_result->current_variance[i] += (ca->current_variance[i] + cb->current_variance[i]);
+//        temp_result->current_variance[i] += (ca->current_variance[i] + cb->current_variance[i]);
     }
 
     //test start
@@ -978,7 +1024,7 @@ EXPORT void bootsANDXOR_16_vector(LweSample_16 *result, const LweSample_16 *ca, 
 //    cout << endl;
 
 
-//    cout << "HEREZZZZZZZZZZZ" << endl;
+//    cout << "HEREZZZZZZZZZZZ" <bootsAND_fullGPU_OneBit< endl;
 
     tfhe_bootstrap_FFT_16(result, bk->bkFFT, MU, nOutputs * vLength * bitSize, temp_result, cudaBkFFT, cudaBkFFTCoalesce,
                           ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu,
@@ -1024,28 +1070,6 @@ EXPORT void bootsANDXOR_16_vector(LweSample_16 *result, const LweSample_16 *ca, 
     temp_result->a = NULL;
     freeLweSample_16(temp_result);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1190,22 +1214,6 @@ EXPORT void bootsAND_MULT_con(LweSample_16 *result,
     temp_result->a = NULL;
     freeLweSample_16(temp_result);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1413,8 +1421,11 @@ EXPORT void bootsMUX_16_vector(LweSample_16 *result, const LweSample_16 *ca, con
         temp_result->current_variance[i + totalBitSize] = - ca->current_variance[i] + cc->current_variance[i]; //for and
     }
 
-    tfhe_bootstrap_woKS_FFT_16_2_vector(u, bk->bkFFT, MU, vLength, nOutputs, bitSize, temp_result, cudaBkFFT, cudaBkFFTCoalesce);
-
+    tfhe_bootstrap_woKS_FFT_16(u, bk->bkFFT, MU, vLength*nOutputs*bitSize, temp_result, cudaBkFFT, cudaBkFFTCoalesce);
+//    tfhe_bootstrap_woKS_FFT_16_2_vector(u, bk->bkFFT, MU, vLength, nOutputs, bitSize, temp_result, cudaBkFFT, cudaBkFFTCoalesce);
+//    tfhe_bootstrap_FFT_16(result, bk->bkFFT, MU, vLength * bitSize * nOutputs, temp_result, cudaBkFFT, cudaBkFFTCoalesce,
+//                          ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu,
+//                          ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
     gridSize = (int) ceil((float) (ex_length) / BLOCKSIZE);
     ANDvec_vector<<<gridSize, BLOCKSIZE>>>(ex_temp_result->a, u->a, u->a + ex_length,
                                             vLength, bitSize, extracted_n, ex_length);
@@ -1424,11 +1435,29 @@ EXPORT void bootsMUX_16_vector(LweSample_16 *result, const LweSample_16 *ca, con
         ex_temp_result->current_variance[i] = u->current_variance[i] + u->current_variance[i + vLength * bitSize];
     }
 
+
+
 //    lweKeySwitch_16(result, bk->ks, u, bitSize, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu,
 //                    ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
 
-    lweKeySwitch_16_2_vector(result, bk->bkFFT->ks, ex_temp_result, vLength, 1, bitSize, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu,
-                             ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
+    lweKeySwitch_16(result, bk->bkFFT->ks, ex_temp_result, vLength*nOutputs*bitSize, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu,
+                    ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
+
+//    lweKeySwitch_16_2_vector(result, bk->bkFFT->ks, ex_temp_result, vLength, 1, bitSize, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu,
+//                             ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
+
+//    length = 500 * bitSize;
+//    int *tempx = new int[length];
+//    cudaMemcpy(tempx, result->a, length * sizeof(Torus32), cudaMemcpyDeviceToHost);
+//    for (int bI = 0; bI < bitSize; ++bI) {
+//        int sI = bI * 500;
+//        for (int i = 0; i < 10; ++i) {
+//            cout << tempx[sI + i] << " ";
+//        }
+//        cout << endl;
+//        cout << result->b[bI] << endl;
+//    }
+//    cout << endl;
 
 //    tfhe_bootstrap_FFT_16_2_vector(result, bk->bkFFT, MU, vLength, nOutputs, bitSize, temp_result, cudaBkFFT,
 //                                   cudaBkFFTCoalesce, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu,
@@ -1681,17 +1710,17 @@ __global__  void prepareForFFT_1_Bit(cufftDoubleComplex *cuDecaFFTCoalesce, cuff
 }
 
 
-__global__ void finishUpFFT_n_Bit(int *temp2, cufftDoubleReal *d_out, int *temp3) {
-    int id = blockIdx.x*blockDim.x+threadIdx.x;
-    register int N = 1024, _2N = 2048;
-    register double _2p32 = double(INT64_C(1) << 32);
-    register double _1sN = double(1) / double(N);
-    register int bitIndex = id / N;
-    register int tIndex = id % N;
-    register int startIndexLarge = bitIndex * _2N;
-    temp2[id] = Torus32(int64_t(d_out[startIndexLarge + tIndex] * _1sN * _2p32)) + temp3[id];//
-
-}
+//__global__ void finishUpFFT_n_Bit(int *temp2, cufftDoubleReal *d_out, int *temp3) {
+//    int id = blockIdx.x*blockDim.x+threadIdx.x;
+//    register int N = 1024, _2N = 2048;
+//    register double _2p32 = double(INT64_C(1) << 32);
+//    register double _1sN = double(1) / double(N);
+//    register int bitIndex = id / N;
+//    register int tIndex = id % N;
+//    register int startIndexLarge = bitIndex * _2N;
+//    temp2[id] = Torus32(int64_t(d_out[startIndexLarge + tIndex] * _1sN * _2p32)) + temp3[id];//
+//
+//}
 
 
 
@@ -1808,7 +1837,7 @@ __global__ void extractionAndKeySwitch_1_Bit(int *result_a, int *result_b,
 
 }
 
-
+/*
 void bootstrapping_gull_gpu_1_bit_wise(LweSample_16 *result, int *temp_res_a, int *temp_res_b, int nBits,
                                        cufftDoubleComplex *cudaBkFFTCoalesceExt,
                                        Torus32 *ks_a_gpu_extendedPtr,
@@ -2033,10 +2062,6 @@ void bootstrapping_gull_gpu_1_bit_wise(LweSample_16 *result, int *temp_res_a, in
 }
 
 
-
-
-
-
 EXPORT void bootsAND_fullGPU_OneBit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
                                     cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
                                     Torus32 *ks_b_gpu_extendedPtr, double *ks_cv_gpu_extendedPtr) {
@@ -2067,6 +2092,7 @@ EXPORT void bootsAND_fullGPU_OneBit(LweSample_16 *result, const LweSample_16 *ca
 }
 
 
+*/
 
 
 
@@ -2090,58 +2116,40 @@ EXPORT void bootsAND_fullGPU_OneBit(LweSample_16 *result, const LweSample_16 *ca
 
 
 
+__constant__ int n = 500, N = 1024, _2N = 2048, Ns2 = 512, Nx2 = 2048, k = 1;
+__constant__ uint32_t halfBg = 512, maskMod = 1023, Bgbit = 10, kpl = 4, l = 2;
+__constant__ uint32_t offset = 2149580800;
+__constant__ double _1sN = double(1) / double(1024);
+__constant__ double _2p32 = double(INT64_C(1) << 32);
 
 
-
-
-__global__ void bootstrappingUptoBlindRotate_n_Bit(int *accum_a_b, int *temp_accum_a_b, int *bara, int *testvectbis,
+__global__ void bootstrappingUptoBlindRotate_n_Bit(int *accum_a_b, int *bara,
                                                    Torus32 MU, int nBits,
                                                    int *temp_res_a, int *barb) {
     register int id = blockIdx.x * blockDim.x + threadIdx.x;
-    register int n = 500, N = 1024, _2N = 2048, Ns2 = 512, Nx2 = 2048;
+    int bIndex = id / N;
+    int baraIndex = id % N;
 
-    register int bIndex = id / N;
-    register int baraIndex = id % N;
-    register int barbi = barb[bIndex];
-    //torusPolynomialMulByXai_16 -> res ->testvectbis, v-> torusPolyTestvect_coef
-    register int a = _2N - barbi;
-    register int aa = a - N;
-    testvectbis[id] = MU;
+    int a = _2N - barb[bIndex];
+    int aa = a - N;
+    register bool L1 = a < N, L2 = baraIndex < a, L3 = baraIndex < aa;
+    register int acc_a_b_id = L1 * (L2 * (-MU) + (!L2) * (MU)) + (!L1) * (L3 * (MU) + (!L3) * (-MU));
 
-    if (a < N) {//1024
-        if (baraIndex < a) {
-            testvectbis[id] = -MU;
-        }
-    } else {
-        if (baraIndex >= aa) {
-            testvectbis[id] = -MU;
-        }
-    }
-    for (int i = 0; i < nBits; ++i) {
-        __syncthreads();
-    }
-    accum_a_b[id] = 0;//accum_a
-    accum_a_b[1024 * nBits + id] = testvectbis[id];
+    accum_a_b[id] = acc_a_b_id;
 
-    temp_accum_a_b[id] = 0;//accum_a
-    temp_accum_a_b[1024 * nBits + id] = 0;
-
-    bara[id] = 0;
-
-    if (id < nBits * 500) {//500
-        bIndex = id / 500;
-        register  int destinationIndex = bIndex * N + id % n;
-        bara[destinationIndex] = modSwitchFromTorus32_GPU_device(temp_res_a[id], Nx2);
+    if(id < n * nBits) {
+        bIndex = id / n;
+        register int temp_res_a_id = temp_res_a[id];
+        register int bara_id = modSwitchFromTorus32_GPU_device(temp_res_a_id, Nx2);
+        bara[bIndex * N + id % n] = bara_id;
     }
 }
 
 
-
 __global__ void prepareForiFFT_n_Bit(int *des, int *decaCoalesce, cufftDoubleReal *d_rev_in,
-                                     int nBits, int nGrid, int *bara, int baraIndex, int *source) {
+                                     int nBits, int *bara, int baraIndex, int *source, int length) {
     register int id = blockIdx.x * blockDim.x + threadIdx.x;
-    register int N = 1024, _2N = 2048, Ns2 = 512;
-
+//    if (id < length) {
 //    bool outerBlock = id < nBits * 2 * 1024;
 //    if (id < nBits * 2 * 1024) {//nBits * (k + 1) * 1024
         register int bitIndex = (id / N) % nBits;
@@ -2150,65 +2158,947 @@ __global__ void prepareForiFFT_n_Bit(int *des, int *decaCoalesce, cufftDoubleRea
         register int a = bara[bitIndex * N + baraIndex];
         register int aa = a - N;
 
-        register bool l1 = a < N, l2 = threadIdModN < a, l3 = threadIdModN < aa;
-
+        register bool L1 = a < N, L2 = threadIdModN < a, L3 = threadIdModN < aa;
 //    des[id] = (!outerBlock) * des[id]
 //              + outerBlock * (l1 * (l2 * (-source[id - a + N] - source[id])
 //                                    + (!l2) * (source[id - a] - source[id]))
 //                              + (!l1) * (l3 * (source[id - aa + N] - source[id])
 //                                         + (!l3) * (-source[id - aa] - source[id])));
 
-    int des_id = (l1 * (l2 * (-source[id - a + N] - source[id])
-                                       + (!l2) * (source[id - a] - source[id]))
-                                 + (!l1) * (l3 * (source[id - aa + N] - source[id])
-                                            + (!l3) * (-source[id - aa] - source[id])));
-
+        register int des_id = 0;
+        register int s1_id = L1 * ((L2) * (id - a + N) + (!L2) * (id - a)) + (!L1) * ((L3) * (id - aa + N) + (!L3) * (id - aa));
+//        int des_id = (L1 * (L2 * (-source[id - a + N] - source[id])
+//                            + (!L2) * (source[id - a] - source[id]))
+//                      + (!L1) * (L3 * (source[id - aa + N] - source[id])
+//                                 + (!L3) * (-source[id - aa] - source[id])));
+        des_id = (L1 * (L2 * (-source[s1_id] - source[id])
+                            + (!L2) * (source[s1_id] - source[id]))
+                      + (!L1) * (L3 * (source[s1_id] - source[id])
+                                 + (!L3) * (-source[s1_id] - source[id])));
 //        if (a < N) {
 //            if (threadIdModN < a) {
-//                des[id] = -source[id - a + N] - source[id];
+////                des[id] = -source[id - a + N] - source[id];
+//                des_id = -source[id - a + N] - source[id];
 //            } else {
-//                des[id] = source[id - a] - source[id];
+////                des[id] = source[id - a] - source[id];
+//                des_id = source[id - a] - source[id];
 //            }
 //        } else {
 //            if (threadIdModN < aa) {
-//                des[id] = source[id - aa + N] - source[id];
+////                des[id] = source[id - aa + N] - source[id];
+//                des_id = source[id - aa + N] - source[id];
 //            } else {
-//                des[id] = -source[id - aa] - source[id];
+////                des[id] = -source[id - aa] - source[id];
+//                des_id = -source[id - aa] - source[id];
 //            }
 //        }
-//    }
-//    for (int i = 0; i < nGrid; ++i) {
-//        __syncthreads();
-//    }
-
-    register uint32_t halfBg = 512, maskMod = 1023, Bgbit = 10, kpl = 4, l = 2;
-    register uint32_t offset = 2149580800;
-
-    bool middleBlock = id < nBits * 2 * 1024;//4//kpl
-
-//    if(id < nBits * 4 * 1024) {//nBits * kpl * 1024
-//        register int p = (id/(N * nBits)) % l;//0 1 0 1
-//        register int index = (id/(l * N * nBits)) % l;//0 1
-
-//    register int sI = index * N * nBits;
-//    register int tid2 = id % (N * nBits);
-
-//        register uint32_t val = ((uint32_t)(des[sI + tid2] + offset));
 
 
+//    bool middleBlock = id < nBits * 2 * 1024;//4//kpl
 
 //        decaCoalesce[id] = middleBlock * (id) + (!middleBlock) * (decaCoalesce[id]);// middleBlock * (temp1 - halfBg) + (!middleBlock) * decaCoalesce[id];
+        register int p = 0;
+        register int decal = (32 - (p + 1) * Bgbit);
+        register uint32_t val = ((uint32_t)(des_id + offset));
+        register uint32_t temp1 = (val >> decal) & maskMod;
+
+        register int xxxxx1 = (temp1 -
+                               halfBg);// + (!middleBlock) * (decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id]);
+
+//    decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id] = xxxxx1;
+//            middleBlock * (temp1 - halfBg) +
+//            (!middleBlock) * (decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id]);
+
+
+        p = 1;
+        decal = (32 - (p + 1) * Bgbit);
+        val = ((uint32_t)(des_id + offset));
+        temp1 = (val >> decal) & maskMod;
+
+        register int xxxxx2 = temp1 - halfBg;
+
+//    decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id + (N * nBits)] = xxxxx2;
+//            middleBlock * (temp1 - halfBg) +
+//            (!middleBlock) * decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id + (N *
+//                                                                                     nBits)];//(temp1 - halfBg) + (!middleBlock) * decaCoalesce[id];//middleBlock * id;//middleBlock * id; //1;//middleBlock * (id) + (!middleBlock) * (decaCoalesce[id]);// middleBlock * (temp1 - halfBg) + (!middleBlock) * decaCoalesce[id];
+        //(!middleBlock) * decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id + (N * nBits)];
+//        decaCoalesce[(nBits * N) + id] = middleBlock * id;//middleBlock * id; //1;//middleBlock * (id) + (!middleBlock) * (decaCoalesce[id]);// middleBlock * (temp1 - halfBg) + (!middleBlock) * decaCoalesce[id];
+//        decaCoalesce[(nBits * N) + id] = middleBlock * id;//middleBlock * id; //1;//middleBlock * (id) + (!middleBlock) * (decaCoalesce[id]);// middleBlock * (temp1 - halfBg) + (!middleBlock) * decaCoalesce[id];
+//    }
+
+//        register int startIndexSmall = bIndex * N;
+
+//    middleBlock = tIndex < N;
+//    d_rev_in[id] = middleBlock * (decaCoalesce[startIndexSmall + tIndex] / 2.)
+//            + (!middleBlock) * (d_rev_in[id] = -decaCoalesce[startIndexSmall + tIndex - N] / 2.);
+
+
+//    d_rev_in[((id / (N * nBits)) * (N * nBits)) + id + (tIndex >= N) * 1024 * bIndex] = id;//middleBlock * (1) + (!middleBlock) * (d_rev_in[id]);
+        int bIndex = (id / N);
+        int tIndex = id % N;
+        int destTod_rev_in = bIndex * _2N + tIndex + (bIndex >= nBits) * nBits * N * 2;
+        d_rev_in[destTod_rev_in] = xxxxx1 / 2.;//id;//
+        d_rev_in[destTod_rev_in + 1024] = -xxxxx1 / 2.;//id;//
+
+        destTod_rev_in += nBits * 2 * 1024;
+        d_rev_in[destTod_rev_in] = xxxxx2 / 2.;//id;
+        d_rev_in[destTod_rev_in + 1024] = -xxxxx2 / 2.;//id;
+//    }
+}
+
+__global__  void prepareForFFT_n_Bit(cufftDoubleComplex *cuDecaFFTCoalesce, cufftDoubleComplex *tmpa_gpuCoal,
+                                     cufftDoubleComplex *d_in, cufftDoubleComplex *d_rev_out,
+                                     cufftDoubleComplex *bki,  int keyIndex, int nBits) {
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+//    if (id < nBits * 4 * 512) {//nBits * kpl * Ns2
+    int tempId = id;
+    int bitIndex = tempId/Ns2;
+    cufftDoubleComplex v0 = d_rev_out[2 * tempId + 1 + bitIndex];//d_rev_out[2 * id + 1 + bitIndex];
+//    cuDecaFFTCoalesce[tempId] = v0;
+
+    tempId = tempId + (Ns2 * nBits);
+    bitIndex = (tempId)/Ns2;
+    cufftDoubleComplex v1 = d_rev_out[2 * tempId + 1 + bitIndex];
+//    cuDecaFFTCoalesce[tempId] = v1;
+
+    tempId = tempId + (Ns2 * nBits);
+    bitIndex = (tempId)/Ns2;
+    cufftDoubleComplex v2 = d_rev_out[2 * tempId + 1 + bitIndex];
+//    cuDecaFFTCoalesce[tempId] = v2;
+
+    tempId = tempId + (Ns2 * nBits);
+    bitIndex = (tempId)/Ns2;
+    cufftDoubleComplex v3 = d_rev_out[2 * tempId + 1 + bitIndex];
+//    cuDecaFFTCoalesce[tempId] = v3;
+
+
+    int keySI = keyIndex * (k + 1) * kpl * Ns2, aID, bID, offset;
+
+
+    int i = 0;
+    offset = i * Ns2;
+    aID = keySI + offset + id % Ns2;
+    bID = keySI + offset + id % Ns2 + Ns2 * kpl;
+    cufftDoubleComplex bki_aid = bki[aID];
+    cufftDoubleComplex bki_bid = bki[bID];
+    cufftDoubleComplex temp_a0 = cuCmul(v0, bki_aid);
+    cufftDoubleComplex temp_b0 = cuCmul(v0, bki_bid);
+
+    i = 1;
+    offset = i * Ns2;
+    aID = keySI + offset + id % Ns2;
+    bID = keySI + offset + id % Ns2 + Ns2 * kpl;
+    bki_aid = bki[aID];
+    bki_bid = bki[bID];
+    cufftDoubleComplex temp_a1 = cuCmul(v1, bki_aid);
+    cufftDoubleComplex temp_b1 = cuCmul(v1, bki_bid);
+
+    i = 2;
+    offset = i * Ns2;
+    aID = keySI + offset + id % Ns2;
+    bID = keySI + offset + id % Ns2 + Ns2 * kpl;
+    bki_aid = bki[aID];
+    bki_bid = bki[bID];
+    cufftDoubleComplex temp_a2 = cuCmul(v2, bki_aid);
+    cufftDoubleComplex temp_b2 = cuCmul(v2, bki_bid);
+
+    i = 3;
+    offset = i * Ns2;
+    aID = keySI + offset + id % Ns2;
+    bID = keySI + offset + id % Ns2 + Ns2 * kpl;
+    bki_aid = bki[aID];
+    bki_bid = bki[bID];
+    cufftDoubleComplex temp_a3 = cuCmul(v3, bki_aid);
+    cufftDoubleComplex temp_b3 = cuCmul(v3, bki_bid);
+
+
+    cufftDoubleComplex tmpa_gpuCoal0;
+    tmpa_gpuCoal0.x = temp_a0.x + temp_a1.x +temp_a2.x +temp_a3.x;
+    tmpa_gpuCoal0.y = temp_a0.y + temp_a1.y +temp_a2.y +temp_a3.y;
+//    tmpa_gpuCoal[id] = tmpa_gpuCoal0;
+
+    cufftDoubleComplex tmpa_gpuCoal1;
+    tmpa_gpuCoal1.x = temp_b0.x + temp_b1.x +temp_b2.x +temp_b3.x;
+    tmpa_gpuCoal1.y = temp_b0.y + temp_b1.y +temp_b2.y +temp_b3.y;
+//    tmpa_gpuCoal[nBits * Ns2 + id] = tmpa_gpuCoal1;
+
+
+//    cufftDoubleComplex temp_a = cuCmul(cuDecaFFTCoalesce[i * (Ns2 * nBits) + id], bki[aID]);
+//    cufftDoubleComplex temp_b = cuCmul(cuDecaFFTCoalesce[i * (Ns2 * nBits) + id], bki[bID]);
+
+    int largeSI = (id / Ns2) * (N + 1);
+    int tid = id % Ns2;
+    d_in[largeSI + 2 * tid + 1] = tmpa_gpuCoal0;
+
+    largeSI = (id / Ns2 + nBits) * (N + 1);
+    d_in[largeSI + 2 * tid + 1] = tmpa_gpuCoal1;
+
+
+}
+
+
+__global__ void finishUpFFT_n_Bit(int *temp2, cufftDoubleReal *d_out, int *temp3, int nBits) {
+
+    register int id = blockIdx.x*blockDim.x+threadIdx.x;
+    register int bitIndex = id / N;
+    register int tIndex = id % N;
+    register int startIndexLarge = bitIndex * _2N;
+    int temp3_id = temp3[id];
+    register cufftDoubleReal d_out_id = d_out[startIndexLarge + tIndex];
+    temp2[id] = Torus32(int64_t(d_out_id * _1sN * _2p32)) + temp3_id;
+}
+
+__global__ void extract_gpu_n_Bit(int *destination, int *source) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register int bitIndex = id / N;
+    register int tIndex = id % N;//corresponding to j
+    register int startIndex = bitIndex * N;
+    register bool L1 = id % N == 0;
+    register int s_id = L1 * (-tIndex + startIndex) + (!L1) * (-tIndex + startIndex + N);
+    register int des_id = source[s_id];
+    des_id = L1 * des_id + (!L1) * (-des_id);// + 32768;
+    destination[id] = des_id;
+}
+
+__global__ void getAibarCoalesce_n_Bit(uint32_t *d_aibar, const Torus32 *ai, int32_t prec_offset, int bitSize, int n) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register int i = id/bitSize;
+    register int tID = id % bitSize;
+    register int startIndex = tID * n;
+    Torus32 ai_i = ai[startIndex + i];
+    d_aibar[id] = ai_i + prec_offset;
+}
+
+__global__ void calculateAijFromAibarCoalesce_n_Bit(uint32_t *aij, uint32_t *aibar, int bitSize, int t, int basebit, int mask) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register int i = id /(bitSize * t);
+    register int j = (id / bitSize) % t;
+    register int tId = id % bitSize;
+    register uint32_t aibar_id = aibar[i * bitSize + tId];
+    aij[id] = (aibar_id >> (32 - (j + 1) * basebit)) & mask;
+}
+
+__global__ void
+lweKeySwitchVectorSubstraction_gpu_testing_coalesce_n_Bit(int *destinationA, Torus32 *sourceA, uint32_t *d_aij,
+                                                          int *destinationB, int *sourceB,
+                                                          int ks_n, int ks_t, int ks_base, int bitSize, int n,
+                                                          int params_n) {
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int A = ks_n, B = ks_t, C = ks_base, D = params_n;
+    register int sourceA_id;
+    register int desA_id = destinationA[id];
+    register int desB_id = 0;
+    desB_id = destinationB[id % bitSize];// the modu is to avoid if and aray index out of bound
+    register int sourceB_id;
+    int bitIndex = id / params_n;
+    int tId = id % (bitSize * params_n);
+#pragma unroll
+    for (register int i = 0; i < 1024; ++i) {
+        int sI = i * (ks_t * bitSize);
+        for (register int j = 0; j < ks_t; ++j) {
+            int sI2 = sI + j * bitSize;
+            int aij = d_aij[sI2 + bitIndex];
+//            if (aij != 0) {
+                sourceA_id = sourceA[i * B * C * D + j * C * D + aij * D + (id % D)];
+                desA_id -= sourceA_id;
+//            }
+//                bool id_lt_bitSize = id < bitSize;
+//                int bi = id_lt_bitSize * d_aij[sI2 + id] + (!id_lt_bitSize) * 0;
+//                if(id < bitSize) {
+            int bi = d_aij[sI2 + (id % bitSize)];//this mod is to avoid the out of bound and to avoid if else
+            desB_id -= sourceB[i * B * C + j * C + bi];
+//                    sourceB_id = sourceB[i * B * C + j * C + bi];
+//                    desB_id -= (id_lt_bitSize * (sourceB_id) + (!id_lt_bitSize) * 0);
+//                }
+        }
+    }
+    destinationA[id] = desA_id;
+    if (id < bitSize) {
+        destinationB[id] = desB_id;
+    }
+}
+
+
+
+void keySwitch_n_Bit(LweSample_16* result, int *u_a_GPU, int *u_b_GPU, int nBits,
+                     Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr) {
+    //key switch
+    const static int n = 500, ks_n = 1024, ks_basebit = 2, ks_t = 8, ks_out_params_n = 500, nTHREADS = 1024;
+    const static int base = 1 << ks_basebit;// base=2 in [CGGI16]
+    const static int32_t prec_offset = 1 << (32 - (1 + ks_basebit * ks_t)); //precision
+    const static int mask = base - 1;
+//    cout << "nBits: " << nBits << endl;
+
+    int coal_d_aibarSize = nBits * ks_n;//16*1024
+    uint32_t *coal_d_aibar;
+    CudaSafeCall(cudaMalloc(&coal_d_aibar, coal_d_aibarSize * sizeof(uint32_t)));
+
+    cudaCheckErrors("ks: 0");
+    getAibarCoalesce_n_Bit<<<nBits, nTHREADS>>>
+                                    (coal_d_aibar,
+                                            u_a_GPU,
+                                            prec_offset,
+                                            nBits,
+                                            ks_n);
+
+    int coal_d_aijSize = ks_n * ks_t * nBits;
+    uint32_t  *coal_d_aij;
+    CudaSafeCall(cudaMalloc(&coal_d_aij, coal_d_aijSize * sizeof(uint32_t)));
+
+    cudaCheckErrors("ks: 1");
+    calculateAijFromAibarCoalesce_n_Bit<<<8 * nBits, nTHREADS>>>
+                                                     (coal_d_aij,
+                                                             coal_d_aibar,
+                                                             nBits,
+                                                             ks_t,
+                                                             ks_basebit,
+                                                             mask);
+    cudaCheckErrors("ks: 2");
+    int nBLOCKS = (int) ceil((float) (nBits * n) / nTHREADS);//500
+    lweKeySwitchVectorSubstraction_gpu_testing_coalesce_n_Bit<<<nBits, n>>>
+                                                                         (result->a,
+                                                                                 ks_a_gpu_extendedPtr,
+                                                                                 coal_d_aij,
+                                                                                 u_b_GPU,
+                                                                                 ks_b_gpu_extendedPtr,
+                                                                                 ks_n,//1024
+                                                                                 ks_t,//8
+                                                                                 base,
+                                                                                 nBits,
+                                                                                 ks_n,//1024
+                                                                                 n);//500/**/
+    cudaCheckErrors("ks: 3");
+//    cudaDeviceSynchronize();
+    CudaSafeCall(cudaMemcpy(result->b, u_b_GPU, nBits * sizeof(int), D2H));
+    cudaCheckErrors("ks: 4");
+
+    cudaFree(coal_d_aibar);
+    cudaFree(coal_d_aij);
+}
+
+void bootstrapAndKeySwitch_n_Bit(LweSample_16* result, int *temp_res_a_gpu, int *temp_res_b_cpu, int nBits,
+                                 cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                 Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr) {
+
+    register int n = 500, nTHREADS = 1024, N = 1024, _2N = 2048, Ns2 = 512, k = 1, kpl = 4, l = 2, offset = 2149580800,
+            halfBg = 512, maskMod = 1023;
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+
+    for (int i = 0; i < nBits; ++i) {
+        temp_res_b_cpu[i] = modSwitchFromTorus32(temp_res_b_cpu[i], _2N);
+    }
+
+    int *accum_a_b, *bara, *temp_accum_a_b, *barb;//, *testvectbis;//accum a and accum b together; bara; tempaccum for mux rotate
+    cudaMalloc(&accum_a_b, nBits * N * (k + 1) * sizeof(int));
+    cudaMalloc(&temp_accum_a_b, nBits * N * (k + 1) * sizeof(int));
+    cudaMalloc(&bara, nBits * N * sizeof(int));
+    cudaMalloc(&barb, nBits * sizeof(int));
+
+    cudaMemset(accum_a_b, 0, nBits * N *  (k + 1) * sizeof(int));
+    cudaMemset(temp_accum_a_b, 0, nBits * N *  (k + 1) * sizeof(int));
+    cudaMemset(bara, 0, nBits * N * sizeof(int));
+    cudaMemcpy(barb, temp_res_b_cpu, nBits * sizeof(int), H2D);
+
+
+    cudaCheckErrors("Here0");
+    bootstrappingUptoBlindRotate_n_Bit<<<nBits, nTHREADS>>>
+                                                (accum_a_b + nBits * N,
+                                                        bara,
+                                                        MU, nBits,
+                                                        temp_res_a_gpu,
+                                                        barb);
+    cudaCheckErrors("Here1");
+
+
+    //cufft helper variables
+    int iFFTBatch = nBits * kpl;//64
+    int FFTBatch = nBits * (k + 1);//32
+
+    cufftDoubleReal* d_rev_in;
+    cufftDoubleComplex *d_rev_out;
+    cufftDoubleComplex *d_in;
+    cufftDoubleReal *d_out;
+
+    //cufft plans
+    cufftHandle p;
+    cufftHandle rev_p;
+
+    //ifft variables allocation
+    CudaSafeCall(cudaMalloc(&d_rev_in, iFFTBatch * _2N * sizeof(cufftDoubleReal)));
+    CudaSafeCall(cudaMalloc(&d_rev_out, iFFTBatch * (N + 1) * sizeof(cufftDoubleComplex)));
+    cufftPlan1d(&rev_p, _2N, CUFFT_D2Z, iFFTBatch);// - nBits);// - (iFFTBatch / dParts));
+//    CudaSafeCall(cudaMemset(d_rev_in, 0, iFFTBatch * _2N * sizeof(cufftDoubleReal)));
+    //fft variables allocation
+    CudaSafeCall(cudaMalloc(&d_in, FFTBatch * (N + 1) * sizeof(cufftDoubleComplex)));
+    CudaSafeCall(cudaMalloc(&d_out, FFTBatch * _2N * sizeof(cufftDoubleReal)));
+    cufftPlan1d(&p, _2N, CUFFT_Z2D, FFTBatch);
+    CudaSafeCall(cudaMemset(d_in, 0, FFTBatch * (N + 1) * sizeof(cufftDoubleComplex)));
+
+    int *temp2 = temp_accum_a_b;
+    int *temp3 = accum_a_b;
+
+    cudaCheckErrors("Here2");
+    for (int j = 0; j < 500; ++j) {//500
+        cudaCheckErrors("HereInside1");
+        prepareForiFFT_n_Bit<<<nBits * 2, nTHREADS>>>
+                                          (temp2,
+                                                  NULL,//decaCoalesce,
+                                                  d_rev_in,
+                                                  nBits,
+                                                  bara,
+                                                  j,
+                                                  temp3, nBits * 2 * nTHREADS);
+        cudaCheckErrors("HereInside2");
+        cufftExecD2Z(rev_p, d_rev_in, d_rev_out);
+//        cudaDeviceSynchronize();
+        cudaCheckErrors("HereInside3");
+
+        prepareForFFT_n_Bit<<<nBits, 512>>>
+                                     (NULL,//cuDecaFFTCoalesce,
+                                             NULL,//tmpa_gpuCoal,
+                                             d_in,
+                                             d_rev_out,
+                                             cudaBkFFTCoalesceExt,
+                                             j,
+                                             nBits);
+        cudaCheckErrors("HereInside4");
+
+        cufftExecZ2D(p, d_in, d_out);
+//        cudaDeviceSynchronize();
+        cudaCheckErrors("HereInside5");
+
+        finishUpFFT_n_Bit<<<nBits * 2, nTHREADS>>>
+                                       (temp2,
+                                               d_out,
+                                               temp3,
+                                               nBits);
+        cudaCheckErrors("HereInside6");
+        swap(temp2, temp3);
+//        int *x = temp2;
+//        temp2 = temp3;
+//        temp3 = x;
+        cudaCheckErrors("HereInside7");
+    }
+
+    //extract
+    int *u_a_GPU, *u_b_CPU, *temp_u_b;
+    cudaMalloc(&u_a_GPU, nBits * N * sizeof(int));
+    u_b_CPU = new int[nBits];
+    temp_u_b = new int[nBits * N * (k + 1)];
+    cudaMemcpy(temp_u_b, accum_a_b, nBits * N * (k + 1) * sizeof(int), D2H);
+
+    extract_gpu_n_Bit<<<nBits, 1024>>>(u_a_GPU, accum_a_b);
+
+    for (int i = 0; i < nBits; ++i) {
+        u_b_CPU[i] = temp_u_b[i * N + nBits * N];
+    }
+
+    int *u_b_GPU;
+    CudaSafeCall(cudaMalloc(&u_b_GPU, nBits * sizeof(int)));
+
+    cudaCheckErrors("Before Extracting");
+    CudaSafeCall(cudaMemset(result->a, 0, nBits * 500 * sizeof(int)));
+    cudaMemcpy(u_b_GPU, u_b_CPU, nBits * sizeof(int), H2D);
+
+    //key switch
+    cudaCheckErrors("Before starting KS");
+    keySwitch_n_Bit(result, u_a_GPU, u_b_GPU, nBits,
+                    ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);/**/
+
+    cudaFree(accum_a_b);
+    cudaFree(temp_accum_a_b);
+    cudaFree(bara);
+    cudaFree(barb);
+
+    //cufft helper variables
+    cudaFree(d_rev_in);
+    cudaFree(d_rev_out);
+    cudaFree(d_in);
+    cudaFree(d_out);
+    cufftDestroy(rev_p);
+    cufftDestroy(p);
+    //KS vars
+    cudaFree(u_a_GPU);
+    delete [] u_b_CPU;
+    delete [] temp_u_b;
+    cudaFree(u_b_GPU);
+}
+
+void bootstrapAndKeySwitch_n_Bit_MUX(LweSample_16* result, Torus32 *temp_res_a_gpu, int *temp_res_b_cpu, int nBits,
+                                 cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                 Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr) {
+
+    register int n = 500, nTHREADS = 1024, N = 1024, _2N = 2048, Ns2 = 512, k = 1, kpl = 4, l = 2, offset = 2149580800,
+            halfBg = 512, maskMod = 1023;
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+
+    for (int i = 0; i < nBits; ++i) {
+        temp_res_b_cpu[i] = modSwitchFromTorus32(temp_res_b_cpu[i], _2N);
+    }
+
+    int *accum_a_b, *bara, *temp_accum_a_b, *barb;//, *testvectbis;//accum a and accum b together; bara; tempaccum for mux rotate
+    CudaSafeCall(cudaMalloc(&accum_a_b, nBits * N * (k + 1) * sizeof(int)));
+    CudaSafeCall(cudaMalloc(&temp_accum_a_b, nBits * N * (k + 1) * sizeof(int)));
+    CudaSafeCall(cudaMalloc(&bara, nBits * N * sizeof(int)));
+    CudaSafeCall(cudaMalloc(&barb, nBits * sizeof(int)));
+
+    CudaSafeCall(cudaMemset(accum_a_b, 0, nBits * N *  (k + 1) * sizeof(int)));
+    CudaSafeCall(cudaMemset(temp_accum_a_b, 0, nBits * N *  (k + 1) * sizeof(int)));
+    CudaSafeCall(cudaMemset(bara, 0, nBits * N * sizeof(int)));
+    CudaSafeCall(cudaMemcpy(barb, temp_res_b_cpu, nBits * sizeof(int), H2D));
+
+
+    cudaCheckErrors("Here0");
+    bootstrappingUptoBlindRotate_n_Bit<<<nBits, nTHREADS>>>
+                                                (accum_a_b + nBits * N,
+                                                        bara,
+                                                        MU, nBits,
+                                                        temp_res_a_gpu,
+                                                        barb);
+    cudaCheckErrors("Here1");
+
+    //cufft helper variables
+    int iFFTBatch = nBits * kpl;//64
+    int FFTBatch = nBits * (k + 1);//32
+
+    cufftDoubleReal* d_rev_in;
+    cufftDoubleComplex *d_rev_out;
+    cufftDoubleComplex *d_in;
+    cufftDoubleReal *d_out;
+
+    //cufft plans
+    cufftHandle p;
+    cufftHandle rev_p;
+
+    //ifft variables allocation
+    CudaSafeCall(cudaMalloc(&d_rev_in, iFFTBatch * _2N * sizeof(cufftDoubleReal)));
+    CudaSafeCall(cudaMalloc(&d_rev_out, iFFTBatch * (N + 1) * sizeof(cufftDoubleComplex)));
+    cufftPlan1d(&rev_p, _2N, CUFFT_D2Z, iFFTBatch);// - nBits);// - (iFFTBatch / dParts));
+    CudaSafeCall(cudaMemset(d_rev_in, 0, iFFTBatch * _2N * sizeof(cufftDoubleReal)));
+    //fft variables allocation
+    CudaSafeCall(cudaMalloc(&d_in, FFTBatch * (N + 1) * sizeof(cufftDoubleComplex)));
+    CudaSafeCall(cudaMalloc(&d_out, FFTBatch * _2N * sizeof(cufftDoubleReal)));
+    cufftPlan1d(&p, _2N, CUFFT_Z2D, FFTBatch);
+    CudaSafeCall(cudaMemset(d_in, 0, FFTBatch * (N + 1) * sizeof(cufftDoubleComplex)));
+
+    int *temp2 = temp_accum_a_b;
+    int *temp3 = accum_a_b;
+
+//        cout << nBits << endl;
+    cudaCheckErrors("Here2");
+    for (int j = 0; j < 500; ++j) {//500
+        cudaCheckErrors("HereInside1");
+        prepareForiFFT_n_Bit<<<nBits * 2, nTHREADS>>>
+                                          (temp2,
+                                                  NULL,//decaCoalesce,
+                                                  d_rev_in,
+                                                  nBits,
+                                                  bara,
+                                                  j,
+                                                  temp3, nBits * 2 * nTHREADS);
+        cudaCheckErrors("HereInside2");
+        cufftExecD2Z(rev_p, d_rev_in, d_rev_out);
+//        cudaDeviceSynchronize();
+        cudaCheckErrors("HereInside3");
+
+        prepareForFFT_n_Bit<<<nBits, 512>>>
+                                     (NULL,//cuDecaFFTCoalesce,
+                                             NULL,//tmpa_gpuCoal,
+                                             d_in,
+                                             d_rev_out,
+                                             cudaBkFFTCoalesceExt,
+                                             j,
+                                             nBits);
+        cudaCheckErrors("HereInside4");
+
+        cufftExecZ2D(p, d_in, d_out);
+//        cudaDeviceSynchronize();
+        cudaCheckErrors("HereInside5");
+
+        finishUpFFT_n_Bit<<<nBits * 2, nTHREADS>>>
+                                       (temp2,
+                                               d_out,
+                                               temp3,
+                                               nBits);
+        cudaCheckErrors("HereInside6");
+//        swap(temp2, temp3);
+        int* x = temp2;
+        temp2 = temp3;
+        temp3 = x;
+        cudaCheckErrors("HereInside7");
+    }
+
+
+
+    //extract
+    int *u_a_GPU, *u_b_CPU, *temp_u_b;
+    CudaSafeCall(cudaMalloc(&u_a_GPU, nBits * N * sizeof(int)));
+    u_b_CPU = new int[nBits];
+    temp_u_b = new int[nBits * N * (k + 1)];
+    CudaSafeCall(cudaMemcpy(temp_u_b, accum_a_b, nBits * N * (k + 1) * sizeof(int), D2H));
+
+    extract_gpu_n_Bit<<<nBits, 1024>>>(u_a_GPU, accum_a_b);
+    for (int i = 0; i < nBits; ++i) {
+        u_b_CPU[i] = temp_u_b[i * N + nBits * N];
+    }
+
+
+    nBits = nBits/2;
+    static const Torus32 MuxConst = modSwitchToTorus32(1, 8);
+    int *u_a_GPU_halfBits, *u_b_CPU_halfBits, *u_b_GPU_halfBits;
+    CudaSafeCall(cudaMalloc(&u_a_GPU_halfBits, nBits * N * sizeof(int)));
+    CudaSafeCall(cudaMalloc(&u_b_GPU_halfBits, nBits * sizeof(int)));
+    u_b_CPU_halfBits = new int[nBits];
+
+    ANDvec_vector<<<nBits, nTHREADS>>>
+                              (u_a_GPU_halfBits,
+                                      u_a_GPU,
+                                      u_a_GPU + nBits * N,
+                                      1, nBits, N, nBits * N);//the three params are redundant and not used
+    for (int i = 0; i < nBits; ++i) {
+        u_b_CPU_halfBits[i] = u_b_CPU[i] + u_b_CPU[i + nBits] + MuxConst;
+    }
+//    cudaMemset(result->a, 0, nBits * 500 * sizeof(Torus32));//TAKEN TO THE CALLER
+    CudaSafeCall(cudaMemcpy(u_b_GPU_halfBits, u_b_CPU_halfBits, nBits * sizeof(int), H2D));
+
+
+    //key switch
+    const static int ks_n = 1024, ks_basebit = 2, ks_t = 8, ks_out_params_n = 500;
+    const static int base = 1 << ks_basebit;// base=2 in [CGGI16]
+    const static int32_t prec_offset = 1 << (32 - (1 + ks_basebit * ks_t)); //precision
+    const static int mask = base - 1;
+//    cout << "nBits: " << nBits << endl;
+
+    int coal_d_aibarSize = nBits * ks_n;//16*1024
+    uint32_t *coal_d_aibar;
+    CudaSafeCall(cudaMalloc(&coal_d_aibar, coal_d_aibarSize * sizeof(uint32_t)));
+
+    cudaCheckErrors("ks: 0");
+    getAibarCoalesce_n_Bit<<<nBits, nTHREADS>>>
+                                    (coal_d_aibar,
+                                            u_a_GPU_halfBits,
+                                            prec_offset,
+                                            nBits,
+                                            ks_n);
+    int coal_d_aijSize = ks_n * ks_t * nBits;
+    uint32_t  *coal_d_aij;
+    CudaSafeCall(cudaMalloc(&coal_d_aij, coal_d_aijSize * sizeof(uint32_t)));
+
+    cudaCheckErrors("ks: 1");
+
+    calculateAijFromAibarCoalesce_n_Bit<<<8 * nBits, nTHREADS>>>
+                                                     (coal_d_aij,
+                                                             coal_d_aibar,
+                                                             nBits,
+                                                             ks_t,
+                                                             ks_basebit,
+                                                             mask);
+    cudaCheckErrors("ks: 2");
+    lweKeySwitchVectorSubstraction_gpu_testing_coalesce_n_Bit<<<nBits, n>>>
+                                                                       (result->a,
+                                                                               ks_a_gpu_extendedPtr,
+                                                                               coal_d_aij,
+                                                                               u_b_GPU_halfBits,
+                                                                               ks_b_gpu_extendedPtr,
+                                                                               ks_n,//1024
+                                                                               ks_t,//8
+                                                                               base,
+                                                                               nBits,
+                                                                               ks_n,//1024
+                                                                               n);//500
+    cudaCheckErrors("ks: 3");
+//    cudaDeviceSynchronize();
+    CudaSafeCall(cudaMemcpy(result->b, u_b_GPU_halfBits, nBits * sizeof(int), D2H));
+    cudaCheckErrors("ks: 4");
+
+
+    cudaCheckErrors("BootsMUX: n");
+
+
+    cudaFree(accum_a_b);
+    cudaFree(temp_accum_a_b);
+    cudaFree(bara);
+    cudaFree(barb);
+    //cufft helper variables
+    cudaFree(d_rev_in);
+    cudaFree(d_rev_out);
+    cudaFree(d_in);
+    cudaFree(d_out);
+    cufftDestroy(rev_p);
+    cufftDestroy(p);
+    //KS vars
+    cudaFree(u_a_GPU);
+    delete [] u_b_CPU;
+    delete [] temp_u_b;
+    cudaFree(u_a_GPU_halfBits);
+    delete [] u_b_CPU_halfBits;
+    cudaFree(u_b_GPU_halfBits);
+    //ks
+    cudaFree(coal_d_aibar);
+    cudaFree(coal_d_aij);
+}
+
+EXPORT void bootsAND_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
+                                          cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
+                                          Torus32 *ks_b_gpu_extendedPtr) {
+    int n = 500, nTHREADS = 1024;
+
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+    //compute: (0,-1/8) + ca + cb
+    static const Torus32 AndConst = modSwitchToTorus32(-1, 8);
+
+    Torus32 *temp_res_a_gpu;
+    int *temp_res_b_cpu;
+    CudaSafeCall(cudaMalloc(&temp_res_a_gpu, n * nBits * sizeof(Torus32)));
+    temp_res_b_cpu = new int[nBits];
+
+    register int length = nBits * n;
+    int nBLOCKS = (int) ceil((float) (length) / nTHREADS);
+    cudaCheckErrors("AND: Here-2");
+    vecAdd<<<nBLOCKS, nTHREADS>>>(temp_res_a_gpu, ca->a, cb->a, length);
+    cudaCheckErrors("AND: Here-1");
+    for (int i = 0; i < nBits; ++i) {
+        temp_res_b_cpu[i] = ca->b[i] + cb->b[i] + AndConst;
+//        temp_res_b_cpu[i] = modSwitchFromTorus32(temp_res_b_cpu[i], _2N);
+    }
+    bootstrapAndKeySwitch_n_Bit(result, temp_res_a_gpu, temp_res_b_cpu, nBits, cudaBkFFTCoalesceExt,
+                                ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    delete [] temp_res_b_cpu;
+    cudaFree(temp_res_a_gpu);
+}
+
+
+EXPORT void bootsXOR_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
+                                   cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
+                                   Torus32 *ks_b_gpu_extendedPtr) {
+    int n = 500, nTHREADS = 1024;
+
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+    //compute: (0,1/4) + 2*(ca + cb)
+    static const Torus32 XorConst = modSwitchToTorus32(1, 4);
+
+    Torus32 *temp_res_a_gpu;
+    int *temp_res_b_cpu;
+    CudaSafeCall(cudaMalloc(&temp_res_a_gpu, n * nBits * sizeof(Torus32)));
+    temp_res_b_cpu = new int[nBits];
+
+    int length = nBits * n;
+    int nBLOCKS = (int) ceil((float) (length) / nTHREADS);
+    cudaCheckErrors("XOR: Here-2");
+
+    int mulVal = 2;
+    vecAddMulTo<<<nBLOCKS, nTHREADS>>>(temp_res_a_gpu, mulVal, ca->a, cb->a, length);
+
+
+    cudaCheckErrors("XOR: Here-1");
+    for (int i = 0; i < nBits; ++i) {
+        temp_res_b_cpu[i] = (ca->b[i] + cb->b[i]) * mulVal + XorConst;
+//        temp_res_b_cpu[i] = modSwitchFromTorus32(temp_res_b_cpu[i], _2N);
+    }
+    bootstrapAndKeySwitch_n_Bit(result, temp_res_a_gpu, temp_res_b_cpu, nBits, cudaBkFFTCoalesceExt,
+                                ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    delete [] temp_res_b_cpu;
+    cudaFree(temp_res_a_gpu);
+}
+
+
+EXPORT void bootsXNOR_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
+                                   cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
+                                   Torus32 *ks_b_gpu_extendedPtr) {
+    int n = 500, nTHREADS = 1024;
+
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+    //compute: (0,-1/4) + 2*(-ca-cb)
+    static const Torus32 XnorConst = modSwitchToTorus32(-1, 4);
+
+    Torus32 *temp_res_a_gpu;
+    int *temp_res_b_cpu;
+    CudaSafeCall(cudaMalloc(&temp_res_a_gpu, n * nBits * sizeof(Torus32)));
+    temp_res_b_cpu = new int[nBits];
+
+    int length = nBits * n;
+    int nBLOCKS = (int) ceil((float) (length) / nTHREADS);
+    cudaCheckErrors("XNOR: Here-2");
+
+    int mulVal = 2;
+    vecAddMulTo<<<nBLOCKS, nTHREADS>>>(temp_res_a_gpu, mulVal, ca->a, cb->a, length);
+    cudaCheckErrors("XNOR: Here-1");
+    for (int i = 0; i < nBits; ++i) {
+        temp_res_b_cpu[i] = (ca->b[i] + cb->b[i]) * mulVal + XnorConst;
+//        temp_res_b_cpu[i] = modSwitchFromTorus32(temp_res_b_cpu[i], _2N);
+        result->b[i] = -MU;
+    }
+    bootstrapAndKeySwitch_n_Bit(result, temp_res_a_gpu, temp_res_b_cpu, nBits, cudaBkFFTCoalesceExt,
+                                ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    delete [] temp_res_b_cpu;
+    cudaFree(temp_res_a_gpu);
+}
+
+
+EXPORT void bootsMUX_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb,
+                                   const LweSample_16 *cc, int nBits, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                   Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr) {
+    static const int n = 500, nTHREADS = 1024;
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+
+    static const Torus32 AndConst = modSwitchToTorus32(-1, 8);
+    static const Torus32 MuxConst = modSwitchToTorus32(1, 8);
+
+    Torus32 *temp_res_a_gpu;
+    int *temp_res_b_cpu;
+    int nOutputs = 2;
+    int nBootsBits = nBits * nOutputs;
+
+
+    CudaSafeCall(cudaMalloc(&temp_res_a_gpu, n * nBootsBits * sizeof(Torus32)));
+    temp_res_b_cpu = new int[nBootsBits];
+
+    int length = nBits * n;
+    int nBLOCKS = (int) ceil((float) (length) / nTHREADS);
+    cudaCheckErrors("XMUX: Here-2");
+
+    ANDvec_vector<<<nBLOCKS, nTHREADS>>>(temp_res_a_gpu, ca->a, cb->a, 1, nBits, n, length);// dummy variables (last4)
+    SUBvec_vector<<<nBLOCKS, nTHREADS>>>(temp_res_a_gpu + length, ca->a, cc->a, 1, nBits, n, length);// dummy variables (last4)
+
+    for (int i = 0; i < nBits; ++i) {
+        temp_res_b_cpu[i] = ca->b[i] + cb->b[i] + AndConst;
+        temp_res_b_cpu[i + nBits] = - ca->b[i] + cc->b[i] + AndConst;
+        result->b[i] = -MU;
+    }
+
+    cudaMemset(result->a, 0, nBits * 500 * sizeof(Torus32));
+    bootstrapAndKeySwitch_n_Bit_MUX(result, temp_res_a_gpu, temp_res_b_cpu, nBootsBits, cudaBkFFTCoalesceExt,
+                                    ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    cudaFree(temp_res_a_gpu);
+    delete [] temp_res_b_cpu;
+}
+
+
+EXPORT void bootsANDXOR_fullGPU_n_Bit_vector(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb,
+                                             const int vLength, const int nBits, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                             Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr) {
+    static const int n = 500, nTHREADS = 1024, nOut = 2;
+    int nTotalInputBits = vLength * nBits;
+    int nTotalOutputBits = vLength * nBits * nOut;
+
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+    //compute: (0,-1/8) + ca + cb
+    static const Torus32 AndConst = modSwitchToTorus32(-1, 8);
+    //compute: (0,1/4) + 2*(ca + cb)
+    static const Torus32 XorConst = modSwitchToTorus32(1, 4);
+    static const int mulValXor = 2;
+
+    Torus32 *temp_res_a_gpu;
+    CudaSafeCall(cudaMalloc(&temp_res_a_gpu, n * nTotalOutputBits * sizeof(Torus32)));
+    int *temp_res_b_cpu = new int[nTotalOutputBits];
+
+    register int length = nTotalOutputBits * n;
+    int nBLOCKS = (int) ceil((float) (length) / nTHREADS);
+    cudaCheckErrors("ANDXOR_vec: Here - 0");
+    ANDXORvecMulAllto_vector<<<nBLOCKS, nTHREADS>>>(temp_res_a_gpu, ca->a, cb->a, vLength, nBits, n, length);
+    cudaCheckErrors("AND: Here - 1");
+    for (int i = 0; i < nTotalInputBits; ++i) {
+        temp_res_b_cpu[i] = ca->b[i] + cb->b[i] + AndConst; //for and
+        temp_res_b_cpu[i + nTotalInputBits] = mulValXor * (ca->b[i] + cb->b[i]) + XorConst;// for xor
+    }
+    bootstrapAndKeySwitch_n_Bit(result, temp_res_a_gpu, temp_res_b_cpu, nTotalOutputBits, cudaBkFFTCoalesceExt,
+                                ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+    cudaCheckErrors("AND: Here - 2");
+
+    delete [] temp_res_b_cpu;
+    cudaFree(temp_res_a_gpu);
+}
+
+EXPORT void bootsXORXOR_fullGPU_n_Bit_vector(LweSample_16 *result,
+                                             const LweSample_16 *ca1, const LweSample_16 *ca2,
+                                             const LweSample_16 *cb1, const LweSample_16 *cb2,
+                                             const int vLength, const int nBits, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                             Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr) {
+    static const int n = 500, nTHREADS = 1024, nOut = 2;
+    int nTotalInputBits = vLength * nBits;
+    int nTotalOutputBits = vLength * nBits * nOut;
+
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+    //compute: (0,1/4) + 2*(ca + cb)
+    static const Torus32 XorConst = modSwitchToTorus32(1, 4);
+    static const int mulValXor = 2;
+
+    Torus32 *temp_res_a_gpu;
+    CudaSafeCall(cudaMalloc(&temp_res_a_gpu, n * nTotalOutputBits * sizeof(Torus32)));
+    int *temp_res_b_cpu = new int[nTotalOutputBits];
+
+    register int length = nTotalInputBits * n;
+    int nBLOCKS = (int) ceil((float) (length) / nTHREADS);
+    cudaCheckErrors("ANDXOR_vec: Here - 0");
+    XORXORvecMulAllto_vector<<<nBLOCKS, nTHREADS>>>(temp_res_a_gpu, ca1->a, ca2->a, n, nBits, length);
+    XORXORvecMulAllto_vector<<<nBLOCKS, nTHREADS>>>(temp_res_a_gpu + length, cb1->a, cb2->a, n, nBits, length);
+
+    cudaCheckErrors("AND: Here - 1");
+
+    for (int i = 0; i < nTotalInputBits; ++i) {
+        temp_res_b_cpu[i] = mulValXor * (ca1->b[i] + ca2->b[i]) + XorConst; //for and
+        temp_res_b_cpu[i + nTotalInputBits] = mulValXor * (cb1->b[i] + cb2->b[i]) + XorConst;// for xor
+    }
+    bootstrapAndKeySwitch_n_Bit(result, temp_res_a_gpu, temp_res_b_cpu, nTotalOutputBits, cudaBkFFTCoalesceExt,
+                                ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+    cudaCheckErrors("AND: Here - 2");
+
+    delete [] temp_res_b_cpu;
+    cudaFree(temp_res_a_gpu);
+}
+
+
+
+
+
+__global__ void bootstrappingUptoBlindRotate_1_Bit_stream(int *accum_a_b, int *temp_accum_a_b, int *bara,
+                                                          int *testvectbis, Torus32 MU, int nBits,
+                                                          int *temp_res_a, int barb) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register bool L1 = (_2N - barb) < N;//a
+    register bool L2 = id < (_2N - barb);//a;
+    register bool L3 = id >= ((_2N - barb) - N);//a//aa;
+
+    register int testvectbis_local = L1 * (L2 * (-1) + (!L2)) * MU + (!L1) * ((L3 * (-1) + (!L3)) * MU);
+    accum_a_b[id] = testvectbis_local;//previously it was id + 1024
+
+    register bool id_lt_500 = id < 500;
+    register int temp_res_a_id = temp_res_a[id];
+    temp_res_a_id = temp_res_a_id * id_lt_500;
+    register int bara_id = modSwitchFromTorus32_GPU_device(temp_res_a_id, Nx2);
+    bara[id] = bara_id;
+}
+
+__global__ void prepareForiFFT_1_Bit_stream(int *des, int *decaCoalesce, cufftDoubleReal *d_rev_in,
+                                     int nBits, int *bara, int baraIndex, int *source) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+//    register int bitIndex = (id / N) % nBits;
+    register int threadIdModN = id % N;
+
+    register int a = bara[baraIndex];//[bitIndex * N + baraIndex];
+    register int aa = a - N;
+
+    register bool L1 = a < N, L2 = threadIdModN < a, L3 = threadIdModN < aa;
+    int source_id = source[id], source_id_a_N = source[id - a + N], source_id_a = source[id - a];
+    int source_id_aa = source[id - aa], source_id_aa_N = source[id - aa + N];
+
+    register int des_id = (L1 * (L2 * (-source_id_a_N - source_id)
+                            + (!L2) * (source_id_a - source_id))
+                            + (!L1) * (L3 * (source_id_aa_N - source_id)
+                            + (!L3) * (-source_id_aa - source_id)));
+//    des[id] = des_id;
     register int p = 0;
     register int decal = (32 - (p + 1) * Bgbit);
     register uint32_t val = ((uint32_t)(des_id + offset));
     register uint32_t temp1 = (val >> decal) & maskMod;
 
-    register int xxxxx1 = (temp1 - halfBg);// + (!middleBlock) * (decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id]);
-
-    decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id] = xxxxx1;
-//            middleBlock * (temp1 - halfBg) +
-//            (!middleBlock) * (decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id]);
-
+    register int xxxxx1 = (temp1 - halfBg);
+//    decaCoalesce[((id / N) * N) + id] = xxxxx1;
 
     p = 1;
     decal = (32 - (p + 1) * Bgbit);
@@ -2217,69 +3107,24 @@ __global__ void prepareForiFFT_n_Bit(int *des, int *decaCoalesce, cufftDoubleRea
 
     register int xxxxx2 = temp1 - halfBg;// +
 
-    decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id + (N * nBits)] = xxxxx2;
-//            middleBlock * (temp1 - halfBg) +
-//            (!middleBlock) * decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id + (N *
-//                                                                                     nBits)];//(temp1 - halfBg) + (!middleBlock) * decaCoalesce[id];//middleBlock * id;//middleBlock * id; //1;//middleBlock * (id) + (!middleBlock) * (decaCoalesce[id]);// middleBlock * (temp1 - halfBg) + (!middleBlock) * decaCoalesce[id];
-                          //(!middleBlock) * decaCoalesce[((id / (N * nBits)) * (N * nBits)) + id + (N * nBits)];
-//        decaCoalesce[(nBits * N) + id] = middleBlock * id;//middleBlock * id; //1;//middleBlock * (id) + (!middleBlock) * (decaCoalesce[id]);// middleBlock * (temp1 - halfBg) + (!middleBlock) * decaCoalesce[id];
-//        decaCoalesce[(nBits * N) + id] = middleBlock * id;//middleBlock * id; //1;//middleBlock * (id) + (!middleBlock) * (decaCoalesce[id]);// middleBlock * (temp1 - halfBg) + (!middleBlock) * decaCoalesce[id];
-//    }
+//    decaCoalesce[((id / N) * N) + id + N] = xxxxx2;
+    register int bIndex = id / N, tIndex = id % N;//, startIndexSmall = bIndex * N;
 
-//    for (int i = 0; i < nGrid; ++i) {
-//        __syncthreads();
-//    }
-    register int bIndex = id / _2N, tIndex = id % _2N, startIndexSmall = bIndex * N;
+    int destTod_rev_in = bIndex * _2N + tIndex + (bIndex >= nBits) * nBits * N * 2;
+    d_rev_in[destTod_rev_in] = xxxxx1/2.;//id;//
+    d_rev_in[destTod_rev_in + 1024] = -xxxxx1/2.;//id;//
 
-//    middleBlock = tIndex < N;
-
-//    d_rev_in[id] = middleBlock * (decaCoalesce[startIndexSmall + tIndex] / 2.)
-//            + (!middleBlock) * (d_rev_in[id] = -decaCoalesce[startIndexSmall + tIndex - N] / 2.);
-
-
-//    d_rev_in[((id / (N * nBits)) * (N * nBits)) + id + (tIndex >= N) * 1024 * bIndex] = id;//middleBlock * (1) + (!middleBlock) * (d_rev_in[id]);
-        bIndex = id / N;
-        tIndex = id % N;
-        int destTod_rev_in = bIndex * _2N + tIndex + (bIndex >= nBits) * nBits * N * 2;
-        d_rev_in[destTod_rev_in] = xxxxx1/2.;//id;//
-        d_rev_in[destTod_rev_in + 1024] = -xxxxx1/2.;//id;//
-
-        destTod_rev_in += nBits * 2 * 1024;
-        d_rev_in[destTod_rev_in] = xxxxx2/2.;//id;
-        d_rev_in[destTod_rev_in + 1024] = -xxxxx2/2.;//id;
-//        d_rev_in[bIndex * _2N + tIndex + nBits * 4 * 1024] = 3;//xxxxx2/2.;
-//        d_rev_in[bIndex * _2N + tIndex + 1024 + nBits * 4 * 1024] = 4;//-xxxxx2/2.;
-
-
-//        d_rev_in[id + (N * nBits * 2) * 2] = id;
-
-//    d_rev_in[((id / (N * nBits)) * (N * nBits)) + id + (tIndex < N) * 1024] = id;//middleBlock * (1) + (!middleBlock) * (d_rev_in[id]);
-//    d_rev_in[((id / (N * nBits)) * (N * nBits)) + id + (tIndex < N) * 1024] = id;//middleBlock * (1) + (!middleBlock) * (d_rev_in[id]);
-//    d_rev_in[((id / (N * nBits)) * (N * nBits)) + id + (N * 2 * nBits) + (tIndex >= N) * 1024] = id;
-//    d_rev_in[((id / (N * nBits)) * (N * nBits)) + id + (N * 2 * nBits * 2) + (tIndex >= N) * 1024] = id; //middleBlock * (1) + (!middleBlock) * (d_rev_in[id]);
-//    d_rev_in[((id / (N * nBits)) * (N * nBits)) + id + (N * 2 * nBits * 3) + (tIndex >= N) * 1024] = id + (N * 2 * nBits); //middleBlock * (1) + (!middleBlock) * (d_rev_in[id]);
-//    d_rev_in[((id / (N * nBits)) * (N * nBits)) + id + (N * 2 * nBits * 3)] = id; //middleBlock * (1) + (!middleBlock) * (d_rev_in[id]);
-//    d_rev_in[((id / (N * nBits)) * (N * nBits)) + id + (N * nBits)] = id; //middleBlock * (1) + (!middleBlock) * (d_rev_in[id]);
-//    d_rev_in[nBits * N + id] = middleBlock * (2) + (!middleBlock) * (d_rev_in[id]);
-
-//    if (tIndex < N) {
-//        d_rev_in[id] = decaCoalesce[startIndexSmall + tIndex] / 2.;
-//    } else {
-//        d_rev_in[id] = -decaCoalesce[startIndexSmall + tIndex - N] / 2.;
-//    }
-
+    destTod_rev_in += 2 * 1024;
+    d_rev_in[destTod_rev_in] = xxxxx2/2.;//id;
+    d_rev_in[destTod_rev_in + 1024] = -xxxxx2/2.;//id;
 }
 
+__global__  void prepareForFFT_1_Bit_Stream(cufftDoubleComplex *cuDecaFFTCoalesce, cufftDoubleComplex *tmpa_gpuCoal,
+                                            cufftDoubleComplex *d_in, cufftDoubleComplex *d_rev_out,
+                                            cufftDoubleComplex *bki,  int keyIndex, int nBits) {
 
-
-
-__global__  void prepareForFFT_n_Bit(cufftDoubleComplex *cuDecaFFTCoalesce, cufftDoubleComplex *tmpa_gpuCoal,
-                                     cufftDoubleComplex *d_in, cufftDoubleComplex *d_rev_out,
-                                     cufftDoubleComplex *bki,  int keyIndex, int nBits, int nGrid) {
     register int id = blockIdx.x*blockDim.x+threadIdx.x;
-    register int Ns2 = 512;
-//    if (id < nBits * 4 * 512) {//nBits * kpl * Ns2
-    int tempId = id;
+    register int tempId = id;
     int bitIndex = tempId/Ns2;
     register cufftDoubleComplex v0 = d_rev_out[2 * tempId + 1 + bitIndex];//d_rev_out[2 * id + 1 + bitIndex];
 //    cuDecaFFTCoalesce[tempId] = v0;
@@ -2299,52 +3144,44 @@ __global__  void prepareForFFT_n_Bit(cufftDoubleComplex *cuDecaFFTCoalesce, cuff
     register cufftDoubleComplex v3 = d_rev_out[2 * tempId + 1 + bitIndex];
 //    cuDecaFFTCoalesce[tempId] = v3;
 
-//    }
-    register int k = 1, kpl = 4, keySI = keyIndex * (k + 1) * kpl * Ns2, aID, bID, offset;
-//
-//    if (id < nBits * 512) {
-//        tmpa_gpuCoal[id].x = 0;
-//        tmpa_gpuCoal[id].y = 0;
-//        tmpa_gpuCoal[nBits * Ns2 + id].x = 0;
-//        tmpa_gpuCoal[nBits * Ns2 + id].y = 0;
-
+    register int keySI = keyIndex * (k + 1) * kpl * Ns2, aID, bID, offset;
 
     int i = 0;
     offset = i * Ns2;
     aID = keySI + offset + id % Ns2;
     bID = keySI + offset + id % Ns2 + Ns2 * kpl;
-    cufftDoubleComplex temp_a0 = cuCmul(v0, bki[aID]);
-    cufftDoubleComplex temp_b0 = cuCmul(v0, bki[bID]);
+    cufftDoubleComplex bki_aid = bki[aID];
+    cufftDoubleComplex bki_bid = bki[bID];
+    cufftDoubleComplex temp_a0 = cuCmul(v0, bki_aid);
+    cufftDoubleComplex temp_b0 = cuCmul(v0, bki_bid);
 
     i = 1;
     offset = i * Ns2;
     aID = keySI + offset + id % Ns2;
     bID = keySI + offset + id % Ns2 + Ns2 * kpl;
-    cufftDoubleComplex temp_a1 = cuCmul(v1, bki[aID]);
-    cufftDoubleComplex temp_b1 = cuCmul(v1, bki[bID]);
+    bki_aid = bki[aID];
+    bki_bid = bki[bID];
+    cufftDoubleComplex temp_a1 = cuCmul(v1, bki_aid);
+    cufftDoubleComplex temp_b1 = cuCmul(v1, bki_bid);
 
     i = 2;
     offset = i * Ns2;
     aID = keySI + offset + id % Ns2;
     bID = keySI + offset + id % Ns2 + Ns2 * kpl;
-    cufftDoubleComplex temp_a2 = cuCmul(v2, bki[aID]);
-    cufftDoubleComplex temp_b2 = cuCmul(v2, bki[bID]);
+    bki_aid = bki[aID];
+    bki_bid = bki[bID];
+    cufftDoubleComplex temp_a2 = cuCmul(v2, bki_aid);
+    cufftDoubleComplex temp_b2 = cuCmul(v2, bki_bid);
 
 
     i = 3;
     offset = i * Ns2;
     aID = keySI + offset + id % Ns2;
     bID = keySI + offset + id % Ns2 + Ns2 * kpl;
-    cufftDoubleComplex temp_a3 = cuCmul(v3, bki[aID]);
-    cufftDoubleComplex temp_b3 = cuCmul(v3, bki[bID]);
-
-
-
-
-//    tmpa_gpuCoal[id] = temp_a3;
-//    tmpa_gpuCoal[nBits * Ns2 + id] = temp_b3;
-
-
+    bki_aid = bki[aID];
+    bki_bid = bki[bID];
+    cufftDoubleComplex temp_a3 = cuCmul(v3, bki_aid);
+    cufftDoubleComplex temp_b3 = cuCmul(v3, bki_bid);
 
     cufftDoubleComplex tmpa_gpuCoal0;
     tmpa_gpuCoal0.x = temp_a0.x + temp_a1.x +temp_a2.x +temp_a3.x;
@@ -2356,52 +3193,89 @@ __global__  void prepareForFFT_n_Bit(cufftDoubleComplex *cuDecaFFTCoalesce, cuff
     tmpa_gpuCoal1.y = temp_b0.y + temp_b1.y +temp_b2.y +temp_b3.y;
 //    tmpa_gpuCoal[nBits * Ns2 + id] = tmpa_gpuCoal1;
 
+    register int largeSI = 0;//(id / Ns2) * (N + 1);
+//    register int tid = id % Ns2;
+    d_in[largeSI + 2 * id + 1] = tmpa_gpuCoal0;
 
-//    cufftDoubleComplex temp_a = cuCmul(cuDecaFFTCoalesce[i * (Ns2 * nBits) + id], bki[aID]);
-//    cufftDoubleComplex temp_b = cuCmul(cuDecaFFTCoalesce[i * (Ns2 * nBits) + id], bki[bID]);
-
-//
-//    for (int i = 0; i < nGrid * 4; ++i) {
-//        __syncthreads();
-//    }
-//    if (id < nBits * 2 * Ns2) {//nBits * (k + 1) * Ns2
-        register int N = 1024, largeSI = (id / Ns2) * (N + 1);
-        register int tid = id % Ns2;
-        d_in[largeSI + 2 * tid + 1] = tmpa_gpuCoal0;
-
-    largeSI = (id / Ns2 + nBits) * (N + 1);
-        d_in[largeSI + 2 * tid + 1] = tmpa_gpuCoal1;
-
-//        d_in[largeSI + 2 * tid + 1].y = tmpa_gpuCoal[id].y;
-//    }
-        __syncthreads();
-
+    largeSI = (N + 1);
+    d_in[largeSI + 2 * id + 1] = tmpa_gpuCoal1;
 }
 
-__global__ void finishUpFFT_n_Bit(int *temp2, cufftDoubleReal *d_out, int *temp3, int nBits) {
-
+__global__ void finishUpFFT_1_Bit_Stream(int *temp2, cufftDoubleReal *d_out, int *temp3) {
     register int id = blockIdx.x*blockDim.x+threadIdx.x;
-    register int N = 1024, _2N = 2048;
     register double _2p32 = double(INT64_C(1) << 32);
     register double _1sN = double(1) / double(N);
     register int bitIndex = id / N;
     register int tIndex = id % N;
     register int startIndexLarge = bitIndex * _2N;
-    temp2[id] = Torus32(int64_t(d_out[startIndexLarge + tIndex] * _1sN * _2p32)) + temp3[id];
-//    if(id < nBits * 2048) {
-//    }
-        __syncthreads();
+    int temp3_id = temp3[id];
+    int temp2_id = Torus32(int64_t(d_out[startIndexLarge + tIndex] * _1sN * _2p32)) + temp3_id;//
+    temp2[id] = temp2_id;
+}
+
+__global__ void extract_gpu_1_Bit_Stream(int *destination, int *source) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register int s_id, des_id;
+    register bool L1 = id == 0;
+    s_id = L1 * id + (!L1) * (N - id);
+    des_id = source[s_id];
+    des_id = L1 * des_id + (!L1) * (-des_id) + 32768;
+    destination[id] = des_id;
 }
 
 
-EXPORT void bootsAND_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
-                                    cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
-                                    Torus32 *ks_b_gpu_extendedPtr, double *ks_cv_gpu_extendedPtr) {
+__global__ void getAibarCoalesce_1_Bit_Stream(uint32_t *d_aibar, Torus32 *ai, int32_t prec_offset) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register int ai_id = ai[id];
+    ai_id += prec_offset;
+    d_aibar[id] = ai_id;
+}
 
-    register int n = 500, BLOCKSIZE = 1024, N = 1024, _2N = 2048, Ns2 = 512, k = 1, kpl = 4, l = 2, offset = 2149580800,
+__global__ void calculateAijFromAibarCoalesce_1_Bit_Stream(uint32_t *aij, uint32_t *aibar, int t, int basebit, int mask) {
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = id / t;
+    int j = id % t;
+    int aibar_i = aibar[i];
+    aij[id] = (aibar_i >> (32 - (j + 1) * basebit)) & mask;
+}
+
+__global__ void lweKeySwitchVectorSubstraction_gpu_testing_coalesce_1_Bit_Stream(int *destinationA, Torus32 *sourceA,
+                                                                                 uint32_t *d_aij,
+                                                                                 int *destinationB, int *sourceB,
+                                                                                 int ks_n, int ks_t, int ks_base, int n,
+                                                                                 int params_n) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int desB = destinationB[0];
+    register int desAid = destinationA[id];
+    register int A = ks_n, B = ks_t, C = ks_base, D = params_n;
+#pragma unroll
+    for (int i = 0; i < 1024; ++i) {//n
+#pragma unroll
+        for (int j = 0; j < 8; ++j) {//ks_t
+            int sI2 = i * ks_t + j;
+            register int aij = d_aij[sI2];
+            register int sa_id = sourceA[i * B * C * D + j * C * D + aij * D + id];
+            desAid -= sa_id;
+            int bi = d_aij[sI2 + id];
+            int sb_id = sourceB[i * B * C + j * C + bi];
+            desB -= sb_id;
+        }
+    }
+
+    destinationA[id] = desAid;
+    if(id < 1) {
+        destinationB[0] = desB;
+    }
+}
+
+
+EXPORT void bootsAND_fullGPU_1_Bit_Stream(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb,
+                                          int nBits, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                          Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr) {
+
+    register int n = 500, nTHREADS = 1024, N = 1024, _2N = 2048, Ns2 = 512, k = 1, kpl = 4, l = 2, offset = 2149580800,
             halfBg = 512, maskMod = 1023;
-    cout << "bBits: " << endl;
-    cout << "here" << endl;
 
     static const Torus32 MU = modSwitchToTorus32(1, 8);
     //compute: (0,-1/8) + ca + cb
@@ -2411,28 +3285,53 @@ EXPORT void bootsAND_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca,
     cudaMalloc(&temp_res_a, n * nBits * sizeof(Torus32));
     temp_res_b = new Torus32[nBits];
 
-
     register int length = 500 * nBits;
-    int gridSize = (int) ceil((float) (length) / BLOCKSIZE);
+    int nBLOCKS = (int) ceil((float) (length) / nTHREADS);
 
-    vecAdd<<<gridSize, BLOCKSIZE>>>(temp_res_a, ca->a, cb->a, length);
+    vecAdd<<<nBLOCKS, nTHREADS>>>(temp_res_a, ca->a, cb->a, length);
     for (int i = 0; i < nBits; ++i) {
         temp_res_b[i] = ca->b[i] + cb->b[i] + AndConst;
         temp_res_b[i] = modSwitchFromTorus32(temp_res_b[i], _2N);
     }
-//    temp_res_cv += ca->current_variance[0] + cb->current_variance[0];
+
+    //create streams
+    cudaDeviceProp cProfile;
+    cudaGetDeviceProperties(&cProfile, 0);
+    int nSM = cProfile.multiProcessorCount;
+    cout << "#SM: " << nSM << endl; //20
+    cudaStream_t streams[nSM];
+
+    for (int i = 0; i < nSM; ++i) {//nSM
+        cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking);
+    }
 
     //bootstrapping woks uptoFFT
-    int *accum_a_b, *bara, *temp_accum_a_b, *barb, *testvectbis;//accum a and accum b together; bara; tempaccum for mux rotate
+    int *accum_a_b, *bara, *temp_accum_a_b;//, *barb, *testvectbis;//accum a and accum b together; bara; tempaccum for mux rotate
     cudaMalloc(&accum_a_b, nBits * N * (k + 1) * sizeof(int));
     cudaMalloc(&temp_accum_a_b, nBits * N * (k + 1) * sizeof(int));
     cudaMalloc(&bara, nBits * N * sizeof(int));
-    cudaMalloc(&barb, nBits * sizeof(int));
-    cudaMalloc(&testvectbis, nBits * N * sizeof(int));
-    cudaMemcpy(barb, temp_res_b, nBits * sizeof(int), cudaMemcpyHostToDevice);
 
-    gridSize = nBits;
-    bootstrappingUptoBlindRotate_n_Bit<<<gridSize, BLOCKSIZE>>>(accum_a_b, temp_accum_a_b, bara, testvectbis, MU, nBits, temp_res_a, barb);
+    cudaMemset(accum_a_b, 0, nBits * N *  (k + 1) * sizeof(int));
+    cudaMemset(temp_accum_a_b, 0, nBits * N *  (k + 1) * sizeof(int));
+    cudaMemset(bara, 0, nBits * N * sizeof(int));
+
+    for (int i = 0; i < nBits; ++i) {
+        int sI = i * 1024 * (k + 1);
+        int si = i * 1024;
+        bootstrappingUptoBlindRotate_1_Bit_stream<<<1, nTHREADS, 0, streams[i % 20]>>>
+                                                                            (accum_a_b + sI + 1024,
+                                                                                    NULL,//temp_accum_a_b + sI,
+                                                                                    bara + si,
+                                                                                    NULL,
+                                                                                    MU, 1,
+                                                                                    temp_res_a + i * 500,
+                                                                                    temp_res_b[i]);
+    }
+
+
+    for (int i = 0; i < 20; ++i) {
+        cudaStreamSynchronize(streams[i]);
+    }
 
     int *decaCoalesce;
     cudaMalloc(&decaCoalesce, nBits * N * kpl * sizeof(int));//1024*4
@@ -2444,21 +3343,24 @@ EXPORT void bootsAND_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca,
     cudaMalloc(&tmpa_gpuCoal, nBits * Ns2 * sizeof(cufftDoubleComplex) * (k + 1));//512*2
 
     //fft variables
-    int iFFTBatch = nBits * kpl;
-    int FFTBatch = nBits * (k + 1);
-    int dParts = 4;
+    int iFFTBatch = nBits * kpl;//64
+    int FFTBatch = nBits * (k + 1);//32
+
     //cufft helper variables
     cufftDoubleReal* d_rev_in;
     cufftDoubleComplex *d_rev_out;
     cufftDoubleComplex *d_in;
     cufftDoubleReal *d_out;
+
     //cufft plans
     cufftHandle p;
     cufftHandle rev_p;
+
     //ifft variables allocation
     cudaMalloc(&d_rev_in, iFFTBatch * _2N * sizeof(cufftDoubleReal));
     cudaMalloc(&d_rev_out, iFFTBatch * (N + 1) * sizeof(cufftDoubleComplex));
     cufftPlan1d(&rev_p, _2N, CUFFT_D2Z, iFFTBatch);// - (iFFTBatch / dParts));
+    cudaMemset(d_rev_in, 0, iFFTBatch * _2N * sizeof(cufftDoubleReal));
     //fft variables allocation
     cudaMalloc(&d_in, FFTBatch * (N + 1) * sizeof(cufftDoubleComplex));
     cudaMalloc(&d_out, FFTBatch * _2N * sizeof(cufftDoubleReal));
@@ -2468,146 +3370,197 @@ EXPORT void bootsAND_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca,
     int *temp2 = temp_accum_a_b;
     int *temp3 = accum_a_b;
 
-//    int *exp = new int[nBits * N];
-//    for (int i = 0; i < nBits * N; ++i) {
-//        exp[i] = i << 5 + 1 << 20;
-//    }
-//    cudaMemcpy(temp3, exp, nBits * N * sizeof(int), cudaMemcpyHostToDevice);
-//    cudaMemcpy(temp2, exp, nBits * N * sizeof(int), cudaMemcpyHostToDevice);
-//    cudaMemcpy(temp3 + nBits * N, exp, nBits * N * sizeof(int), cudaMemcpyHostToDevice);
-//    cudaMemcpy(temp2 + nBits * N, exp, nBits * N * sizeof(int), cudaMemcpyHostToDevice);
-
-        //create streams
-    cudaDeviceProp cProfile;
-    cudaGetDeviceProperties(&cProfile, 0);
-    int nSM = cProfile.multiProcessorCount;
-    cout << "#SM: " << nSM << endl; //20
-    cudaStream_t streams[nSM];
-
-#pragma unroll
-    for (int i = 0; i < 20; ++i) {//nSM
-        cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking);
-    }
-
-    ofstream myfile;
-    myfile.open ("fullGPU.txt", ios::out);
-    for (int j = 0; j < 1; ++j) {
-
-        gridSize = nBits * (k + 1);//as accum is of (k + 1) * 1024;
-//        prepareForiFFT_n_Bit<<<gridSize, BLOCKSIZE>>>(temp2, decaCoalesce, d_rev_in, nBits, gridSize, bara, j, temp3);
-
-//
-        for (int bIndex = 0; bIndex < nBits; ++bIndex) {
-            int temp2Start = bIndex * N * (k + 1);
-            int decaCoalesceStart = bIndex * 1024 * kpl;
-            int d_rev_inStart = bIndex * 2048 * kpl;
-            int baraStart = bIndex * N;
-            int nUnitBit = 1;
-            gridSize = nUnitBit * (k + 1);//1 * 2
-            prepareForiFFT_n_Bit<<<gridSize, BLOCKSIZE>>>(temp2 + temp2Start, decaCoalesce + decaCoalesceStart,
-                    d_rev_in + d_rev_inStart, nUnitBit, gridSize, bara + baraStart, j, temp3 + temp2Start);
+    for (int j = 0; j < 500; ++j) {
+//        nBLOCKS = nBits * (k + 1);//as accum is of (k + 1) * 1024;
+        for (int i = 0; i < nBits; ++i) {
+            int tLweSampleStart = i * (k + 1) * N;
+            int baraStart = i * N;
+            int dCoalesceStart = i * kpl * N;
+            int d_rev_inStart = i * kpl * _2N;
+            prepareForiFFT_1_Bit_stream<<<2, nTHREADS, 0, streams[i % nSM]>>>
+                                                          (temp2 + tLweSampleStart,
+                                                                  decaCoalesce + dCoalesceStart,
+                                                                  d_rev_in + d_rev_inStart,
+                                                                  1,//nBits,
+                                                                  bara + baraStart,
+                                                                  j,
+                                                                  temp3 + tLweSampleStart);
         }
 
-        cudaDeviceSynchronize();
+        for (int i = 0; i < nSM; ++i) {
+            cudaStreamSynchronize(streams[i]);
+        }
 
         cufftExecD2Z(rev_p, d_rev_in, d_rev_out);
         cudaDeviceSynchronize();
 
-        int length = nBits * 1 * Ns2;//kpl
-        gridSize = (int) ceil((float) (length) / BLOCKSIZE);
-        int bkKeyIndex = j * (k + 1) * kpl * Ns2;
-        prepareForFFT_n_Bit<<<gridSize, BLOCKSIZE>>>(cuDecaFFTCoalesce, tmpa_gpuCoal, d_in, d_rev_out, cudaBkFFTCoalesceExt, j, nBits, gridSize);
+        for (int i = 0; i < nBits; ++i) {
+            int cuDecaFFTCoalesceStart = i * kpl * Ns2;
+            int d_rev_outStart = i * kpl * (N + 1);
+            int tmpa_gpuCoalStart = i * Ns2 * (k + 1);
+            int d_inStart = i * (N + 1) * (k + 1);
+            prepareForFFT_1_Bit_Stream<<<1, 512, 0, streams[i % nSM]>>>
+                                                    (cuDecaFFTCoalesce + cuDecaFFTCoalesceStart,
+                                                            tmpa_gpuCoal + tmpa_gpuCoalStart,
+                                                            d_in + d_inStart,
+                                                            d_rev_out + d_rev_outStart,
+                                                            cudaBkFFTCoalesceExt,
+                                                            j, 1);
+        }
+
+        for (int i = 0; i < nSM; ++i) {
+            cudaStreamSynchronize(streams[i]);
+        }
 
         cufftExecZ2D(p, d_in, d_out);
         cudaDeviceSynchronize();
 
-        length = nBits * N * 2;
-        gridSize = (int) ceil((float) (length) / BLOCKSIZE); //2*nBits
-        finishUpFFT_n_Bit<<<gridSize, BLOCKSIZE>>>(temp2, d_out, temp3, nBits);
+        for (int i = 0; i < nBits; ++i) {
+            int tlweSampleStart = i * (k + 1) * N;
+            int d_outStart = i * (k + 1) * _2N;
+            finishUpFFT_1_Bit_Stream<<<2, nTHREADS, 0, streams[i % nSM]>>>
+                                                       (temp2 + tlweSampleStart,
+                                                               d_out + d_outStart,
+                                                               temp3 + tlweSampleStart);
+        }
 
-        cudaDeviceSynchronize();
-
-//        myfile << "j: " << j << " input: ";
-//        length = nBits * N * (k + 1);//nBits * (N + 1) * (k + 1);//iFFTBatch * Ns2;
-//        int *temp = new int[length];
-//        cudaMemcpy(temp, temp3, length * sizeof(int), cudaMemcpyDeviceToHost);
-//        for (int i = 0; i < nBits * (k + 1); ++i) {
-//            int sI = i * N;//(N + s1);
-//            for (int j = 0; j < 10; ++j) {
-//                myfile << temp[sI + j] << " ";
-//            }
-////        cout << endl;
-//        }
-//        myfile << endl;
-
-//        length = nBits * _2N * kpl;
-////        myfile << "j: " << j << " output: ";
-//        cufftDoubleReal *temp = new cufftDoubleReal[length];
-//        cudaMemcpy(temp, d_rev_in, length * sizeof(cufftDoubleReal), cudaMemcpyDeviceToHost);
-//        for (int i = 0; i < nBits * kpl; ++i) {
-//            int sI = i * (_2N);
-//            for (int j = 0; j < 10; ++j) {
-////                myfile << temp[sI + j] << " ";
-//                cout << temp[sI + j] << " ";
-//            }
-//            cout << endl;
-//        }
-////        myfile << endl;
-//        cout << endl;
-
+        for (int i = 0; i < nSM; ++i) {
+            cudaStreamSynchronize(streams[i]);
+        }
         swap(temp2, temp3);
 
+    }
 
-//        length = FFTBatch * (N + 1);//nBits * kpl * (N + 1);
-//        cufftDoubleComplex *tempxx = new cufftDoubleComplex[length];
-//        cudaMemcpy(tempxx, d_in, length * sizeof(cufftDoubleComplex), cudaMemcpyDeviceToHost);
-//        for (int i = 0; i < FFTBatch; ++i) {
-//            int sI = i * (N + 1);//(N + 1);//(N + s1);
-//            for (int j = 0; j < (N + 1); ++j) {
-//                cout << "(" << tempxx[sI + j].x << "," <<  tempxx[sI + j].y << ") ";
-//            }
-//            cout << endl;
+    //extract
+    int *u_a, *u_b, *temp_u_b;
+
+    cudaMalloc(&u_a, nBits * N * sizeof(int));
+    u_b = new int[nBits];
+    temp_u_b = new int[nBits * N * (k + 1)];
+    cudaMemcpy(temp_u_b, accum_a_b, nBits * N * (k + 1) * sizeof(int), D2H);
+    for (int i = 0; i < nBits; ++i) {
+        int accum_a_bStart = i * N * (k + 1);
+        int u_aStart = i * N;
+        extract_gpu_1_Bit_Stream<<<1, 1024, 0, streams[i % nSM]>>>
+                                               (u_a + u_aStart,
+                                                       accum_a_b + accum_a_bStart);
+        u_b[i] = temp_u_b[accum_a_bStart + N];
+    }
+
+    int *result_b_gpu;
+    cudaMalloc(&result_b_gpu, nBits * sizeof(int));
+
+    cudaMemset(result->a, 0, nBits * 500 * sizeof(int));
+    cudaMemcpy(result_b_gpu, u_b, nBits * sizeof(int), H2D);
+
+    for (int i = 0; i < nSM; ++i) {
+        cudaStreamSynchronize(streams[i]);
+    }
+    //key switch
+    const int ks_n = 1024, ks_basebit = 2, ks_t = 8, ks_out_params_n = 500;
+    const int base = 1 << ks_basebit;// base=2 in [CGGI16]
+    const int32_t prec_offset = 1 << (32 - (1 + ks_basebit * ks_t)); //precision
+    const int mask = base - 1;
+/*
+//    int coal_d_aibarSize = nBits * ks_n;//16*1024
+//    uint32_t *coal_d_aibar;
+//    cudaMalloc(&coal_d_aibar, coal_d_aibarSize * sizeof(uint32_t));
+//
+//    for (int i = 0; i < nBits; ++i) {
+//        int coal_d_aibarStart = i * N;
+//        int u_aStart = i * N;
+//        getAibarCoalesce_1_Bit_Stream<<<1, 1024, 0, streams[i % nSM]>>>
+//                                                    (coal_d_aibar + coal_d_aibarStart,
+//                                                            u_a + u_aStart,
+//                                                            prec_offset);
+//    }
+//
+//    for (int i = 0; i < nSM; ++i) {
+//        cudaStreamSynchronize(streams[i]);
+//    }*/
+
+
+    int coal_d_aijSize = ks_n * ks_t * nBits;
+    uint32_t  *coal_d_aij;
+    cudaMalloc(&coal_d_aij, coal_d_aijSize * sizeof(uint32_t));
+
+    for (int i = 0; i < nBits; ++i) {
+        int coal_d_aijStart = i * ks_n * ks_t;
+//        int coal_d_aibarStart = i * ks_n;
+        int u_aStart = i * ks_n;//1024
+        calculateAijFromAibarCoalesce_1_Bit_Stream<<<8, 1024, 0, streams[i % nSM]>>>
+                                                                 (coal_d_aij + coal_d_aijStart,
+                                                                         (uint32_t*)u_a + u_aStart,
+                                                                         ks_t, ks_basebit, mask);
+    }
+
+    for (int i = 0; i < nSM; ++i) {
+        cudaStreamSynchronize(streams[i]);
+    }
+
+    for (int i = 0; i < nBits; ++i) {
+        int res_aStart = i * 500;
+        int coal_d_aijStart = i * ks_n * ks_t;
+        int result_b_gpuStart = i;
+        lweKeySwitchVectorSubstraction_gpu_testing_coalesce_1_Bit_Stream<<<1, 500, 0, streams[i % nSM]>>>
+                                                                         (result->a + res_aStart,
+                                                                                 ks_a_gpu_extendedPtr,
+                                                                                 coal_d_aij + coal_d_aijStart,
+                                                                                 result_b_gpu + i,
+                                                                                 ks_b_gpu_extendedPtr,
+                                                                                 ks_n, ks_t, base,
+                                                                                 1024,
+                                                                                 500);
+    }
+
+    for (int i = 0; i < nSM; ++i) {
+        cudaStreamSynchronize(streams[i]);
+    }
+
+    cudaMemcpy(result->b, result_b_gpu, nBits * sizeof(int), D2H);
+
+
+
+
+//    int *h_res_a = new int[nBits * 500];
+//    cudaMemcpy(h_res_a, result->a, nBits * 500 * sizeof(int), D2H);
+//    for (int i = 0; i < nBits; ++i) {
+//        int sI = i * 500;
+//        for (int j = 0; j < 10; ++j) {
+//            cout << h_res_a[sI + j] << " ";
 //        }
-
-//make main && ./main 10 2 > test1.txt  && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt  && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt && ./main 10 2 >> test1.txt
-
-    }
-//    myfile << endl;
-    myfile.close();
-
-
-
-
-    length = nBits * N * (k + 1);//nBits * (N + 1) * (k + 1);//iFFTBatch * Ns2;
-    int *temp = new int[length];
-    cudaMemcpy(temp, temp3, length * sizeof(int), cudaMemcpyDeviceToHost);
-    for (int i = 0; i < nBits * 2; ++i) {
-        int sI = i * N;//(N + 1);
-        for (int j = 0; j < 10; ++j) {
-            cout << temp[sI + j] << " ";
-//                cout << "(" << temp[sI + j].x << "," <<  temp[sI + j].y << ") ";
-        }
-        cout << endl;
-    }
-
-
-
-
-
-#pragma unroll
-    for (int i = 0; i < 20; ++i) { //nSM
-        cudaStreamDestroy(streams[i]);
-
-    }
-
-
+//        cout << endl;
+//    }
+//    cout << endl;
 
     delete [] temp_res_b;
     cudaFree(temp_res_a);
     cudaFree(accum_a_b);
     cudaFree(temp_accum_a_b);
     cudaFree(bara);
-    cudaFree(barb);
-    cudaFree(testvectbis);
+//    cudaFree(barb);
+//    cudaFree(testvectbis);
 
+    cudaFree(decaCoalesce);
+    cudaFree(cuDecaFFTCoalesce);
+    cudaFree(tmpa_gpuCoal);
+    //cufft helper variables
+    cudaFree(d_rev_in);
+    cudaFree(d_rev_out);
+    cudaFree(d_in);
+    cudaFree(d_out);
+    cufftDestroy(rev_p);
+    cufftDestroy(p);
+
+    cudaFree(u_a);
+    free(u_b);
+    free(temp_u_b);
+    cudaFree(result_b_gpu);
+
+//    cudaFree(coal_d_aibar);
+
+
+    for (int i = 0; i < nSM; ++i) { //nSM
+        cudaStreamDestroy(streams[i]);
+    }
 }

@@ -14,9 +14,11 @@
 #include "cudaFFTTest.h"
 #include "matrixUtility.h"
 #include<cuda_profiler_api.h>
+#include <string>
 
 #define D2D cudaMemcpyDeviceToDevice
 #define D2H cudaMemcpyDeviceToHost
+#define H2D cudaMemcpyHostToDevice
 
 #define nExp 5
 
@@ -35,6 +37,14 @@
 
 using namespace std;
 
+void freeLweSample_16_gpu(LweSample_16 *toFree) {
+    cudaFree(toFree->a);
+    toFree->a = NULL;
+    free(toFree->b);
+    free(toFree->current_variance);
+    delete toFree;
+}
+
 
 cufftDoubleComplex ****sendBootstrappingKeyToGPU(int bitSize, const TFheGateBootstrappingCloudKeySet *bk) {
     const TGswParams *bk_params = bk->bkFFT->bk_params;//bk->bk_params;
@@ -48,14 +58,14 @@ cufftDoubleComplex ****sendBootstrappingKeyToGPU(int bitSize, const TFheGateBoot
     const int l = bk_params->l;//2
     const int kpl = bk_params->kpl;//4
     const int Ns2 = N / 2;
-    //test variables
-//    cout << "n: " << n << endl;
-//    cout << "N: " << N << endl;
-//    cout << "Ns2: " << Ns2 << endl;
-//    cout << "bitSize: " << bitSize << endl;
-//    cout << "tlwe_params->k: " << tlwe_params->k << endl;//1
-//    cout << "bk_params->l: " << bk_params->l << endl;//2
-//    cout << "bk_params->kpl: " << bk_params->kpl << endl;//4
+    /*//test variables
+    cout << "n: " << n << endl;
+    cout << "N: " << N << endl;
+    cout << "Ns2: " << Ns2 << endl;
+    cout << "bitSize: " << bitSize << endl;
+    cout << "tlwe_params->k: " << tlwe_params->k << endl;//1
+    cout << "bk_params->l: " << bk_params->l << endl;//2
+    cout << "bk_params->kpl: " << bk_params->kpl << endl;//4*/
     cufftDoubleComplex ****cudaBkFFT = new cufftDoubleComplex ***[n];//n = 500
     for (int i = 0; i < n; ++i) {//500
         cudaBkFFT[i] = new cufftDoubleComplex **[kpl];
@@ -312,15 +322,6 @@ Torus32 ****sendKeySwitchKeyToGPU(int bitSize, const TFheGateBootstrappingCloudK
     return ks_a_gpu;
 }
 
-//__global__ void sendKeySwitchKeyToGPU_extendedMemAllocationHelper(Torus32** destination, Torus32 *source, int k,
-//                                                                  int bitSize, int n, int length) {
-//    int id = blockIdx.x * blockDim.x + threadIdx.x;
-//    if (id < length) {
-//        cudaMalloc(&destination[k], sizeof(Torus32) * bitSize * n);
-//        cudaMemcpyToSymbol(destination[k], source, sizeof(Torus32) * bitSize * n, 0, cudaMemcpyHostToDevice);
-//    }
-//}
-
 Torus32 ****sendKeySwitchKeyToGPU_extended(int bitSize, const TFheGateBootstrappingCloudKeySet *bk) {
     /***Key Transfer v2 starts***/
     //variables
@@ -505,131 +506,6 @@ void testCipher(char *name, LweSample_16 *to_test, int bitSize, const TFheGateBo
     //test end
 }
 
-//void bootsAND_16_test(LweSample *cresult, const LweSample *ca, const LweSample *cb, int bitSize,
-//                      const TFheGateBootstrappingCloudKeySet *bk,
-//                      TFheGateBootstrappingSecretKeySet *key) {
-//    double startTime = omp_get_wtime();
-//    for (int i = 0; i < bitSize; ++i) {
-//        bootsXOR(&cresult[i], &ca[i], &cb[i], bk);
-//    }
-//    cout << endl << "Time for Sequential AND: " << omp_get_wtime() - startTime << endl << endl;
-//
-//    cufftDoubleComplex ****cudaBkFFT = sendBootstrappingKeyToGPU(bitSize, bk);
-//    Torus32 ****ks_a_gpu = NULL;//sendKeySwitchKeyToGPU(bitSize, bk);
-//    Torus32 ****ks_a_gpu_extended = sendKeySwitchKeyToGPU_extended(bitSize, bk);
-//    int ***ks_b_gpu = sendKeySwitchBtoGPU(bk);
-//    double ***ks_cv_gpu = sendKeySwitchCVtoGPU(bk);
-//    const LweParams *in_out_params = bk->params->in_out_params;
-//
-//    LweSample_16* a = convertBitToNumber(ca, bitSize, bk);
-//    LweSample_16* b = convertBitToNumber(cb, bitSize, bk);
-//    LweSample_16* result = convertBitToNumberZero(bitSize, bk);
-//
-//    //send a, b, and result to cuda
-//    int * temp = new int[bitSize * in_out_params->n];
-//
-//    temp = a->a;
-//    cudaMalloc(&(a->a), bitSize * in_out_params->n * sizeof(int));
-//    cudaMemcpy(a->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-//    free(temp);
-//
-//    temp = b->a;
-//    cudaMalloc(&(b->a), bitSize * in_out_params->n * sizeof(int));
-//    cudaMemcpy(b->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-//    free(temp);
-//
-//    temp = result->a;
-//    cudaMalloc(&(result->a), bitSize * in_out_params->n * sizeof(int));
-//    cudaMemcpy(result->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-//    free(temp);
-//
-//    cudaCheckErrors("cudaMalloc/cudaMemcpy failed");
-//    cudaDeviceSynchronize();
-//
-//    startTime = omp_get_wtime();
-//    bootsXOR_16(result, a, b, bitSize, bk, cudaBkFFT, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu);
-//    cout << "Time for || AND: " << omp_get_wtime() - startTime << endl;
-//    testCipher("result", result, bitSize, bk, key);
-//    bootsXOR_16(result, a, b, bitSize, bk, cudaBkFFT, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu);
-//    testCipher("result", result, bitSize, bk, key);
-//    bootsXOR_16(result, a, b, bitSize, bk, cudaBkFFT, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu);
-//    testCipher("result", result, bitSize, bk, key);
-//    bootsXOR_16(result, a, b, bitSize, bk, cudaBkFFT, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu);
-//    testCipher("result", result, bitSize, bk, key);
-//    bootsXOR_16(result, b, b, bitSize, bk, cudaBkFFT, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu);
-//    testCipher("result", result, bitSize, bk, key);
-//    bootsXOR_16(b, a, b, bitSize, bk, cudaBkFFT, ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu);
-//    testCipher("b", b, bitSize, bk, key);
-//
-//
-//    temp = new int[bitSize * in_out_params->n];
-//    cudaMemcpy(temp, result->a, sizeof(int) * bitSize * in_out_params->n, cudaMemcpyDeviceToHost);
-//    cudaFree(result->a);
-//    result->a = temp;
-//
-//    LweSample* andOutput = convertNumberToBits(result, bitSize, bk);
-//
-//    Cipher andOutputCipher(bitSize);
-//    andOutputCipher.data = andOutput;
-//
-//    cout << "In bootsAND_16_test : " << decryptCheck(andOutputCipher, key) << endl;
-//
-//}
-//
-//void bootsXOR_16_test(LweSample *cresult, const LweSample *ca, const LweSample *cb, int bitSize,
-//                      const TFheGateBootstrappingCloudKeySet *bk,
-//                      TFheGateBootstrappingSecretKeySet *key) {
-//    double startTime = omp_get_wtime();
-//    for (int i = 0; i < bitSize; ++i) {
-//        bootsXOR(&cresult[i], &ca[i], &cb[i], bk);
-//    }
-//    cout << endl << "Time for Sequential XOR: " << omp_get_wtime() - startTime << endl << endl;
-//    //convert to number
-//    LweSample_16* a = convertBitToNumber(ca, bitSize, bk);
-//    LweSample_16* b = convertBitToNumber(cb, bitSize, bk);
-//    LweSample_16* result = convertBitToNumberZero(bitSize, bk);
-//
-//    cufftDoubleComplex ****cudaBkFFT = sendBootstrappingKeyToGPU(bitSize, bk);
-//
-//    Torus32 ****ks_a_gpu = sendKeySwitchKeyToGPU(bitSize, bk);
-//    Torus32 ****ks_a_gpu_extended = sendKeySwitchKeyToGPU_extended(bitSize, bk);
-//
-//    //send a, b, and result to cuda
-//    const LweParams *in_out_params = bk->params->in_out_params;
-//    int * temp = new int[bitSize * in_out_params->n];
-//    temp = a->a;
-//    cudaMalloc(&(a->a), bitSize * in_out_params->n * sizeof(int));
-//    cudaMemcpy(a->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-//    free(temp);
-//
-//    temp = b->a;
-//    cudaMalloc(&(b->a), bitSize * in_out_params->n * sizeof(int));
-//    cudaMemcpy(b->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-//    free(temp);
-//
-//    temp = result->a;
-//    cudaMalloc(&(result->a), bitSize * in_out_params->n * sizeof(int));
-//    cudaMemcpy(result->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-//    free(temp);
-//
-//
-//    startTime = omp_get_wtime();
-//    bootsXOR_16(result, a, b, bitSize, bk, cudaBkFFT, ks_a_gpu, ks_a_gpu_extended);
-//    cout << "Time for || XOR: " << omp_get_wtime() - startTime << endl;
-//
-//    //get data in cpu from gpu
-//    temp = new int[bitSize * in_out_params->n];
-//    cudaMemcpy(temp, result->a, sizeof(int) * bitSize * in_out_params->n, cudaMemcpyDeviceToHost);
-//    cudaFree(result->a);
-//    result->a = temp;
-//
-//    LweSample* andOutput = convertNumberToBits(result, bitSize, bk);
-//
-//    Cipher andOutputCipher(bitSize);
-//    andOutputCipher.data = andOutput;
-//
-//    cout << "In bootsXOR_16_test: " << decryptCheck(andOutputCipher, key) << endl;
-//}
 
 __global__ void vecOneBitLeftShift(int *destnation, int *source, int n, int bitSize, int length) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -704,76 +580,6 @@ void leftShiftCuda_16(LweSample_16 *cudaResult, LweSample_16 *cudaA, int bitSize
 }
 
 
-void bootsCircuitADDSequential(LweSample_16 *cudaRes, LweSample_16 *cudaA, LweSample_16 *cudaB, int bitSize,
-                               cufftDoubleComplex ****cudaBkFFT, cufftDoubleComplex ***cudaBkFFTCoalesce,
-                               Torus32 ****ks_a_gpu_extended,
-                               const TFheGateBootstrappingCloudKeySet *bk,
-                               TFheGateBootstrappingSecretKeySet *key, int ***ks_b_gpu, double ***ks_cv_gpu) {
-    const LweParams *in_out_params = bk->params->in_out_params;
-    LweSample_16 *carry = convertBitToNumberZero_GPU(bitSize, bk);
-    LweSample_16 *tempB = convertBitToNumberZero_GPU(bitSize, bk);
-
-
-    //make cudaRes equal to cudaA
-    cudaMemcpy(cudaRes->a, cudaA->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(cudaRes->b, cudaA->b, sizeof(int) * bitSize);
-    memcpy(cudaRes->current_variance, cudaA->current_variance, sizeof(int) * bitSize);
-
-    //make tempB equal B
-    cudaMemcpy(tempB->a, cudaB->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(tempB->b, cudaB->b, sizeof(int) * bitSize);
-    memcpy(tempB->current_variance, cudaB->current_variance, sizeof(int) * bitSize);
-
-
-    for (int i = 0; i < bitSize; ++i) {
-//        bootsAND_16(carry, cudaRes, tempB, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended, ks_b_gpu,
-//                    ks_cv_gpu);
-//        bootsXOR_16(cudaRes, cudaRes, tempB, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended,
-//                    ks_b_gpu, ks_cv_gpu);
-//        leftShiftCuda_16(tempB, carry, bitSize, bk);
-    }
-    //free memory
-    cudaFree(carry->a);
-    carry->a = NULL;
-    freeLweSample_16(carry);
-    cudaFree(tempB->a);
-    tempB->a = NULL;
-    freeLweSample_16(tempB);
-}
-
-void bootsCircuitADDParallelOpenMP(LweSample_16 *cudaRes, LweSample_16 *cudaA, LweSample_16 *cudaB, int bitSize,
-                                   cufftDoubleComplex ****cudaBkFFT, Torus32 ****ks_a_gpu_extended,
-                                   const TFheGateBootstrappingCloudKeySet *bk,
-                                   TFheGateBootstrappingSecretKeySet *key,
-                                   cudaFFTProcessorTest *p1,
-                                   cudaFFTProcessorTest *p2) {
-    const LweParams *in_out_params = bk->params->in_out_params;
-    LweSample_16 *carry = convertBitToNumberZero_GPU(bitSize, bk);
-    LweSample_16 *tempB = convertBitToNumberZero_GPU(bitSize, bk);
-
-
-    //make cudaRes equal to cudaA
-    cudaMemcpy(cudaRes->a, cudaA->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(cudaRes->b, cudaA->b, sizeof(int) * bitSize);
-    memcpy(cudaRes->current_variance, cudaA->current_variance, sizeof(int) * bitSize);
-
-    //make tempB equal B
-    cudaMemcpy(tempB->a, cudaB->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(tempB->b, cudaB->b, sizeof(int) * bitSize);
-    memcpy(tempB->current_variance, cudaB->current_variance, sizeof(int) * bitSize);
-
-    testCipher("carry", carry, bitSize, bk, key);
-    testCipher("tempB", tempB, bitSize, bk, key);
-
-    //free memory
-    cudaFree(carry->a);
-    carry->a = NULL;
-    freeLweSample_16(carry);
-    cudaFree(tempB->a);
-    tempB->a = NULL;
-    freeLweSample_16(tempB);
-}
-
 
 __global__ void oneBitLeftShiftInTwoBitOutput(int *destination, int *source, int bitSize, int n, int length) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -810,145 +616,40 @@ void oneBitLeftShiftFromTwoOutputs(LweSample_16 *output, LweSample_16 *input, in
 }
 
 
-void taskLevelParallelAdd(LweSample_16 *cudaRes, LweSample_16 *a, LweSample_16 *b, int bitSize,
-                          const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex ****cudaBkFFT,
-                          cufftDoubleComplex ***cudaBkFFTCoalesce, Torus32 ****ks_a_gpu, Torus32 ****ks_a_gpu_extended,
-                          int ***ks_b_gpu, double ***ks_cv_gpu,
-                          Torus32* ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr, double *ks_cv_gpu_extendedPtr,
+void taskLevelParallelAdd(LweSample_16 *result, LweSample_16 *a, LweSample_16 *b, int nBits,
+                          const TFheGateBootstrappingCloudKeySet *bk,
+                          cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                          Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
                           TFheGateBootstrappingSecretKeySet *key) {
 
-    int nOutputs = 2;
-    const LweParams *in_out_params = bk->params->in_out_params;
-    LweSample_16 *taskResult = convertBitToNumberZero(bitSize, bk);
-    LweSample_16 *tempB = convertBitToNumberZero_GPU(bitSize, bk);
-//    LweSample_16* testingVec = convertBitToNumberZero_GPU(bitSize, bk);
-    //modify result so that it can accomodate 2 resuts
-    cudaMalloc(&(taskResult->a), nOutputs * bitSize * in_out_params->n * sizeof(int));
-    taskResult->b = (int *) calloc(nOutputs * bitSize, sizeof(int));
-    taskResult->current_variance = (double *) calloc(nOutputs * bitSize, sizeof(double));
+    const int nOut = 2;
+    static const int n = 500;
+    LweSample_16 *taskResult = convertBitToNumberZero_GPU(nBits * nOut, bk);  //bitSize * nOut -> to accomodate intermediate compound gate
+    LweSample_16 *tempB = convertBitToNumberZero_GPU(nBits, bk);
 
-    cudaMemcpy(tempB->a, b->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(tempB->b, b->b, bitSize * sizeof(int));
-    memcpy(tempB->current_variance, b->current_variance, bitSize * sizeof(double));
-//    testCipher("tempB", tempB, bitSize, bk, key);
+    //tempB = b
+    cudaMemcpy(tempB->a, b->a, nBits * n * sizeof(int), D2D);
+    memcpy(tempB->b, b->b, nBits * sizeof(int));
+//    testCipher("tempB", tempB, nBits, bk, key);
 
-    cudaMemcpy(cudaRes->a, a->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(cudaRes->b, a->b, bitSize * sizeof(int));
-    memcpy(cudaRes->current_variance, a->current_variance, bitSize * sizeof(double));
-//    testCipher("cudaRes", cudaRes, bitSize, bk, key);
-    //test for vector addition
-//    bootsANDXOR_16(taskResult, cudaRes, tempB, nOutputs, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended,
-//                   ks_b_gpu, ks_cv_gpu);
-//    cudaMemcpy(carry->a, taskResult->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(carry->b, taskResult->b, bitSize * sizeof(int));
-//    memcpy(carry->current_variance, taskResult->current_variance, bitSize * sizeof(double));
-//    testCipher("a", a, bitSize, bk, key);
-//    testCipher("b", b, bitSize, bk, key);
-//    testCipher("AND", carry, bitSize, bk, key);
-//    cudaMemcpy(carry->a, taskResult->a + (bitSize * in_out_params->n), bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(carry->b, taskResult->b + bitSize, bitSize * sizeof(int));
-//    memcpy(carry->current_variance, taskResult->current_variance + bitSize, bitSize * sizeof(double));
-//    testCipher("XOR", carry, bitSize, bk, key);
-//    oneBitLeftShiftFromTwoOutputs(tempB, taskResult, bitSize, bk);
-//    testCipher("XOR", tempB, bitSize, bk, key);
-//    cudaMemcpy(cudaRes->a, result->a + (bitSize * in_out_params->n), sizeof(int) * bitSize * in_out_params->n,
-//               cudaMemcpyDeviceToDevice);
-//    memcpy(cudaRes->b, result->b + bitSize, bitSize * sizeof(int));
-//    memcpy(cudaRes->current_variance, result->current_variance + bitSize, bitSize * sizeof(double));
-//    testCipher("cudaRes", cudaRes, bitSize, bk, key);
-    for (int i = 0; i < bitSize; ++i) {
+    //result = a
+    cudaMemcpy(result->a, a->a, nBits * n * sizeof(int), D2D);
+    memcpy(result->b, a->b, nBits * sizeof(int));
+//    testCipher("result", result, nBits, bk, key);
 
-        bootsANDXOR_16(taskResult, cudaRes, tempB, nOutputs, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended, ks_b_gpu,
-                       ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
+    for (int i = 0; i < nBits; ++i) {
+        bootsANDXOR_fullGPU_n_Bit_vector(taskResult, result, tempB, 1, //1 -> vLength
+                                         nBits, cudaBkFFTCoalesceExt,
+                                         ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+        oneBitLeftShiftFromTwoOutputs(tempB, taskResult, nBits, bk);
 
-        //split the result
-//        LweSample_16 *carry = convertBitToNumberZero_GPU(bitSize, bk);
-//        cudaMemcpy(carry->a, taskResult->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(carry->b, taskResult->b, bitSize * sizeof(int));
-//        memcpy(carry->current_variance, taskResult->current_variance, bitSize * sizeof(double));
-//        testCipher("AND", carry, bitSize, bk, key);
-        oneBitLeftShiftFromTwoOutputs(tempB, taskResult, bitSize, bk);
-//
-//        testCipher("ANDshifted", tempB, bitSize, bk, key);
-
-
-        cudaMemcpy(cudaRes->a, taskResult->a + (bitSize * in_out_params->n), sizeof(int) * bitSize * in_out_params->n,
-                   cudaMemcpyDeviceToDevice);
-        memcpy(cudaRes->b, taskResult->b + bitSize, bitSize * sizeof(int));
-        memcpy(cudaRes->current_variance, taskResult->current_variance + bitSize, bitSize * sizeof(double));
-//        testCipher("XOR", cudaRes, bitSize, bk, key);
-
-//        cudaMemcpy(testingVec->a, taskResult->a + (bitSize * in_out_params->n), sizeof(int) * bitSize * in_out_params->n,
-//                   cudaMemcpyDeviceToDevice);
-//        memcpy(testingVec->b, taskResult->b + bitSize, bitSize * sizeof(int));
-//        memcpy(testingVec->current_variance, taskResult->current_variance + bitSize, bitSize * sizeof(double));
-//        testCipher("XOR", testingVec, bitSize, bk, key);
-//        cout << "I am here" << endl;
-
-//        leftShiftCuda_16(tempB, carry, bitSize, bk);
-//        testCipher("tempB", tempB, bitSize, bk, key);
+        cudaMemcpy(result->a, taskResult->a + (nBits * n), sizeof(int) * nBits * n, D2D);
+        memcpy(result->b, taskResult->b + nBits, nBits * sizeof(int));
     }
+//    testCipher("Addition Result", result, nBits, bk, key);
+        freeLweSample_16_gpu(taskResult);
+        freeLweSample_16_gpu(tempB);
 }
-
-void addCudaLweSamplePreProcessing(LweSample *ca, LweSample *cb, int bitSize,
-                                   const TFheGateBootstrappingCloudKeySet *bk,
-                                   TFheGateBootstrappingSecretKeySet *key) {
-    //get keys
-
-    cufftDoubleComplex ****cudaBkFFT = sendBootstrappingKeyToGPU(bitSize, bk);
-    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(bitSize, bk);
-    Torus32 ****ks_a_gpu_extended = sendKeySwitchKeyToGPU_extended(bitSize, bk);
-    int ***ks_b_gpu = sendKeySwitchBtoGPU(bk);
-    double ***ks_cv_gpu = sendKeySwitchCVtoGPU(bk);
-    const LweParams *in_out_params = bk->params->in_out_params;
-
-    //convert to number
-    LweSample_16 *a = convertBitToNumber(ca, bitSize, bk);
-    LweSample_16 *b = convertBitToNumber(cb, bitSize, bk);
-    LweSample_16 *result = convertBitToNumberZero(bitSize, bk);
-    LweSample_16 *carry = convertBitToNumberZero(bitSize, bk);
-    LweSample_16 *tempB = convertBitToNumberZero(bitSize, bk);
-
-    //send a, b, result, carry and tempB to cuda
-    int *temp;
-    temp = a->a;
-    cudaMalloc(&(a->a), bitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(a->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-    free(temp);
-
-    temp = b->a;
-    cudaMalloc(&(b->a), bitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(b->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-    free(temp);
-
-    free(carry->a);
-    cudaMalloc(&(carry->a), bitSize * in_out_params->n * sizeof(int));
-
-    //send a to result
-    free(result->a);
-    cudaMalloc(&(result->a), bitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(result->a, a->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(result->b, a->b, sizeof(int) * bitSize);
-    memcpy(result->current_variance, a->current_variance, sizeof(int) * bitSize);
-    //send b to tempB
-    free(tempB->a);
-    cudaMalloc(&(tempB->a), bitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(tempB->a, b->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(tempB->b, b->b, sizeof(int) * bitSize);
-    memcpy(tempB->current_variance, b->current_variance, sizeof(int) * bitSize);
-
-    testCipher("a", a, bitSize, bk, key);
-    testCipher("b", b, bitSize, bk, key);
-
-    double sTime = omp_get_wtime();
-    bootsCircuitADDSequential(result, a, b, bitSize, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu_extended, bk, key, ks_b_gpu,
-                              ks_cv_gpu);
-    cout << "Time taken to ADD (Sequential): " << omp_get_wtime() - sTime << endl;
-    testCipher("ADD", result, bitSize, bk, key);
-}
-
-
-
 
 __global__ void oneBitLeftShiftInTwoBitOutput_vector(int *destination, int *source, int vLength, int bitSize, int n, int length) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1117,285 +818,200 @@ void taskLevelParallelAdd_Vector(LweSample_16 *mainResult, LweSample_16 *a, LweS
 }
 
 
+void taskLevelParallelAdd_bitwise(LweSample_16 *result, LweSample_16 *a, LweSample_16 *b,
+                                  const int nBits, const TFheGateBootstrappingCloudKeySet *bk,
+                                  cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                  Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                                  TFheGateBootstrappingSecretKeySet *key) {
+    const int nOut = 2, n = 500, nAdditionBits = 1;
 
-
-
-void taskLevelParallelAdd_bitwise(LweSample_16 *mainResult, LweSample_16 *a, LweSample_16 *b,
-                                         int vLength, int bitSize, const TFheGateBootstrappingCloudKeySet *bk,
-                                         cufftDoubleComplex ****cudaBkFFT, cufftDoubleComplex ***cudaBkFFTCoalesce,
-                                         Torus32 ****ks_a_gpu, Torus32 ****ks_a_gpu_extended, int ***ks_b_gpu,
-                                         double ***ks_cv_gpu, Torus32 *ks_a_gpu_extendedPtr,
-                                         Torus32 *ks_b_gpu_extendedPtr, double *ks_cv_gpu_extendedPtr,
-                                         TFheGateBootstrappingSecretKeySet *key) {
-    int nOutputs = 2, n = bk->params->in_out_params->n, nBits = 1;
     LweSample_16 *r = convertBitToNumberZero_GPU(2, bk);
-    LweSample_16 *r1 = convertBitToNumberZero_GPU(1, bk);
     LweSample_16 *t = convertBitToNumberZero_GPU(2, bk);
-    LweSample_16 *t1 = convertBitToNumberZero_GPU(1, bk);
-    LweSample_16 *ai = convertBitToNumberZero_GPU(1, bk);
-    LweSample_16 *bi = convertBitToNumberZero_GPU(1, bk);
-    LweSample_16 *temp = convertBitToNumberZero_GPU(1, bk);
 
-    cudaFree(r1->a);
-    cudaFree(t1->a);
-    cudaFree(ai->a);
-    cudaFree(bi->a);
+    //pointers to positions
+    LweSample_16 *r1 = new LweSample_16;
+    LweSample_16 *t1 = new LweSample_16;
+    LweSample_16 *ai = new LweSample_16;
+    LweSample_16 *bi = new LweSample_16;
 
     t1->a = t->a + n;
-    t1->b = t->b + nBits;
-    t1->current_variance = t->current_variance + nBits;
+    t1->b = t->b + nAdditionBits;
+    t1->current_variance = t->current_variance + nAdditionBits;
 
     r1->a = r->a + n;
-    r1->b = r->b + nBits;
-    r1->current_variance = r->current_variance + nBits;
+    r1->b = r->b + nAdditionBits;
+    r1->current_variance = r->current_variance + nAdditionBits;
 
-    // t0 = a, t1 = b;
-//    cudaMemcpy(t->a, a->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(t->b, a->b, sizeof(int));
-//    memcpy(t->current_variance, a->current_variance, sizeof(double));
-//
-//    cudaMemcpy(t->a + nBits * n, b->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(t->b + nBits, b->b, sizeof(int));
-//    memcpy(t->current_variance + nBits, b->current_variance, sizeof(double));
-//
-//    bootsAND_16(t, t, t1, nBits, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended, ks_b_gpu,
-//                ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-//
-//    bootsXOR_16(r, a, t1, nBits, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended, ks_b_gpu,
-//                ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-//
-//    cudaMemcpy(r1->a, t->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(r1->b, t->b, sizeof(int));
-//    memcpy(r1->current_variance, t->current_variance, sizeof(double));
-    bootsANDXOR_16(r, a, b, nOutputs, nBits, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended,
-                   ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
+    bootsANDXOR_fullGPU_n_Bit_vector(r, a, b, 1,
+                                     1, cudaBkFFTCoalesceExt,
+                                     ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
 
-//    cudaMemcpy(temp->a, r->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp->b, r->b, nBits * sizeof(int));
-//    testCipher("R0", temp, nBits, bk, key);
-//
-//    cudaMemcpy(temp->a, r->a + nBits * n, nBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp->b, r->b + nBits, nBits * sizeof(int));
-//    testCipher("R1", temp, nBits, bk, key);
-
-    cudaMemcpy(mainResult->a, r->a + n, n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(mainResult->b, r->b + nBits, sizeof(int));
-    memcpy(mainResult->current_variance, r->current_variance + nBits, sizeof(double));
-
-    cudaMemcpy(r->a + n, r->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(r->b + nBits, r->b, sizeof(int));
-    memcpy(r->current_variance + nBits, r->current_variance, sizeof(double));
+    cudaMemcpy(result->a, r->a + n, n * sizeof(int), D2D);
+    memcpy(result->b, r->b + nAdditionBits, sizeof(int));
 
 
-    for (int bI = 1; bI < bitSize; ++bI) {
+    cudaMemcpy(r->a + nAdditionBits * n, r->a, n * sizeof(int), D2D);
+    memcpy(r->b + nAdditionBits, r->b, sizeof(int));
+
+    for (int bI = 1; bI < nBits; ++bI) {
         ai->a = a->a + n * bI;
         ai->b = a->b + bI;
-        ai->current_variance = a->current_variance + bI;
-//        cudaMemcpy(ai->a, a->a + n * bI, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(ai->b, a->b + bI, sizeof(int));
-//        memcpy(ai->current_variance, a->current_variance + bI, sizeof(double));
-//
+
         bi->a = b->a + n * bI;
         bi->b = b->b + bI;
-        bi->current_variance = b->current_variance + bI;
-//        cudaMemcpy(bi->a, b->a + n * bI, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(bi->b, b->b + bI, sizeof(int));
-//        memcpy(bi->current_variance, b->current_variance + bI, sizeof(double));
-//
-//        cudaMemcpy(r1->a, r->a + n, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(r1->b, r->b + 1, sizeof(int));
-//        memcpy(r1->current_variance, r->current_variance + 1, sizeof(double));
 
-//        cout << "----------" << endl;
-//        cudaMemcpy(temp->a, r1->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp->b, r1->b, nBits * sizeof(int));
-//        memcpy(temp->current_variance, r1->current_variance, nBits * sizeof(double));
-//        testCipher("R1", temp, nBits, bk, key);
+        bootsXORXOR_fullGPU_n_Bit_vector(t,
+                                         ai, r1,
+                                         bi, r1,
+                                         1, nAdditionBits, cudaBkFFTCoalesceExt,
+                                         ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
 
-//        cudaMemcpy(temp->a, ai->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp->b, ai->b, nBits * sizeof(int));
-//        memcpy(temp->current_variance, ai->current_variance, nBits * sizeof(double));
-//        testCipher("ai", temp, nBits, bk, key);
+        bootsAND_fullGPU_n_Bit(t,
+                               t, t1,
+                               nAdditionBits, cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
 
-//        cudaMemcpy(temp->a, bi->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp->b, bi->b, nBits * sizeof(int));
-//        memcpy(temp->current_variance, bi->current_variance, nBits * sizeof(double));
-//        testCipher("bi", temp, nBits, bk, key);
-//        cout << endl;
+        bootsXORXOR_fullGPU_n_Bit_vector(r,
+                                         ai, t1,
+                                         t, r1,
+                                         1, nAdditionBits, cudaBkFFTCoalesceExt,
+                                         ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
 
-//        cout << "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX" << endl;
-        bootsXORXOR_16(t, ai, r1, bi, r1, nOutputs, nBits, bk, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu, ks_a_gpu_extended,
-                       ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-
-//        cudaMemcpy(temp->a, t->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp->b, t->b, nBits * sizeof(int));
-//        memcpy(temp->current_variance, t->current_variance, nBits * sizeof(double));
-//        testCipher("t0", temp, nBits, bk, key);
-//
-//        cudaMemcpy(temp->a, t->a + nBits * n, nBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp->b, t->b + nBits, nBits * sizeof(int));
-//        memcpy(temp->current_variance, t->current_variance + nBits, nBits * sizeof(double));
-//        testCipher("t1", temp, nBits, bk, key);
-
-        bootsAND_16(t, t, t1, nBits, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended, ks_b_gpu,
-                    ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-
-
-//        cudaMemcpy(temp->a, t->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp->b, t->b, nBits * sizeof(int));
-//        memcpy(temp->current_variance, t->current_variance, nBits * sizeof(double));
-//        testCipher("t0t1", temp, nBits, bk, key);
-
-        bootsXORXOR_16(r, ai, t1, t, r1, nOutputs, nBits, bk, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu, ks_a_gpu_extended,
-                       ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-
-        cudaMemcpy(mainResult->a + bI * n, r->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(mainResult->b + bI, r->b, sizeof(int));
-        memcpy(mainResult->current_variance + bI, r->current_variance, sizeof(double));
-
-//        cudaMemcpy(temp->a, r->a, n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp->b, r->b, nBits * sizeof(int));
-//        memcpy(temp->current_variance, r->current_variance, nBits * sizeof(double));
-//        testCipher("R0", temp, nBits, bk, key);
-
-//        cudaMemcpy(temp->a, r->a + nBits * n, nBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp->b, r->b + nBits, nBits * sizeof(int));
-//        memcpy(temp->current_variance, r->current_variance + nBits, nBits * sizeof(double));
-//        testCipher("R1", temp, nBits, bk, key);
-//        testCipher("Main result", mainResult, bitSize, bk, key);
-
-
-//        testCipher("t", t, 2, bk, key);
+        cudaMemcpy(result->a + bI * n, r->a, n * sizeof(int), D2D);
+        memcpy(result->b + bI, r->b, sizeof(int));
     }
-//    testCipher("Main result", mainResult, bitSize, bk, key);
 
+    freeLweSample_16_gpu(r);
+    freeLweSample_16_gpu(t);
+    delete r1;
+    delete t1;
+    delete ai;
+    delete bi;
 }
 
 
 void test_AND_XOR_CompoundGate_Addition(LweSample *ca, LweSample *cb, int bitSize,
-                              const TFheGateBootstrappingCloudKeySet *bk,
-                              TFheGateBootstrappingSecretKeySet *key) {
+                                        const TFheGateBootstrappingCloudKeySet *bk,
+                                        cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                        Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                                        TFheGateBootstrappingSecretKeySet *key) {
     //get keys
-    int nOutputs = 2;
-    cufftDoubleComplex ****cudaBkFFT = NULL;//sendBootstrappingKeyToGPU(bitSize, bk);
-    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(1, bk);
-    cufftDoubleComplex *cudaBkFFTCoalesceExt = sendBootstrappingKeyToGPUCoalesceExt(bk);
-    Torus32 ****ks_a_gpu_extended = NULL;//sendKeySwitchKeyToGPU_extended(bitSize, bk);
-//    Torus32 ****ks_a_gpu_extended_2 = sendKeySwitchKeyToGPU_extended_2(nOutputs, bitSize, bk);
-    int ***ks_b_gpu = NULL;//sendKeySwitchBtoGPU(bk);
-    double ***ks_cv_gpu = NULL;//sendKeySwitchCVtoGPU(bk);
-    const LweParams *in_out_params = bk->params->in_out_params;
-    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, bk);
-//    Torus32 *ks_a_gpu_extendedPtr2 = sendKeySwitchKeyToGPU_extendedOnePointer(bitSize, bk);
-    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(bk);
-    double *ks_cv_gpu_extendedPtr = sendKeySwitchCVtoGPUOnePtr(bk);
-
-
-//    Torus32 *ks_a_gpu_extendedOnePtr = sendKeySwitchKeyToGPU_extendedOnePointer(bitSize, bk);
-
+    const int n = 500;
+    const int nOut = 2;
+    double sTime;
     //convert to number
     LweSample_16 *a = convertBitToNumber(ca, bitSize, bk);
     LweSample_16 *b = convertBitToNumber(cb, bitSize, bk);
-    LweSample_16 *result = convertBitToNumberZero(bitSize, bk);
-    LweSample_16 *andResult = convertBitToNumberZero(bitSize, bk);
-    LweSample_16 *xorResult = convertBitToNumberZero(bitSize, bk);
+    LweSample_16 *additionResult = convertBitToNumberZero_GPU(bitSize, bk);
+    LweSample_16 *andResult = convertBitToNumberZero_GPU(bitSize, bk);
+    LweSample_16 *xorResult = convertBitToNumberZero_GPU(bitSize, bk);
+    LweSample_16 *andxorResult = convertBitToNumberZero_GPU(bitSize * nOut, bk);
 
-    //send a, b, result to cuda
+    //Prepare data
     int *temp;
     temp = a->a;
-    cudaMalloc(&(a->a), bitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(a->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&(a->a), bitSize * n * sizeof(int));
+    cudaMemcpy(a->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
     free(temp);
 
     temp = b->a;
-    cudaMalloc(&(b->a), bitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(b->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&(b->a), bitSize * n * sizeof(int));
+    cudaMemcpy(b->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
     free(temp);
 
-    free(andResult->a);
-    free(xorResult->a);
-    cudaMalloc(&(andResult->a), bitSize * in_out_params->n * sizeof(int));
-    cudaMalloc(&(xorResult->a), bitSize * in_out_params->n * sizeof(int));
+    cout << "...Starting Experiments for A and B of " << bitSize << " bits... " << endl;
+    testCipher("A", a, bitSize, bk, key);
+    testCipher("B", b, bitSize, bk, key);
 
-    //modify result so that it can accomodate 2 resuts
-    cudaMalloc(&(result->a), nOutputs * bitSize * in_out_params->n * sizeof(int));
-    result->b = (int *) calloc(nOutputs * bitSize, sizeof(int));
-    result->current_variance = (double *) calloc(nOutputs * bitSize, sizeof(double));
-
-    float et;
-    cudaEvent_t start, stop;
-//    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
-    cout << "...Starting Experiments of: A and B of " << bitSize << " bits... " << endl;
+    cout << "-----Starting AND operation-----" << endl;
     for (int i = 0; i < nExp; ++i) {
-        double sTime = omp_get_wtime();
-        bootsAND_16(andResult, a, b, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended, ks_b_gpu,
-                    ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-
-        double eTime = omp_get_wtime();
-        cout << " --------" << "AND time taken: " << eTime - sTime << " --------" << endl;
-        testCipher("AB", andResult, bitSize, bk, key);
-        //gpu bootAND
-//        andResult = convertBitToNumberZero_GPU(bitSize, bk);
-//        testCipher("AB before GPU and call", andResult, bitSize, bk, key);
-
-//        sTime = omp_get_wtime();
-//        bootsAND_fullGPU_OneBit(andResult, a, b, bitSize, cudaBkFFTCoalesceExt, ks_a_gpu_extendedPtr,
-//                              ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-//        bootsAND_fullGPU_n_Bit(andResult, a, b, bitSize, cudaBkFFTCoalesceExt, ks_a_gpu_extendedPtr,
-//                                ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-//        cudaDeviceSynchronize();
-//        eTime = omp_get_wtime();
-//        cout << " --------" << "AND time taken (full GPU): " << eTime - sTime << " --------" << endl;
-//        testCipher("AB after and", andResult, bitSize, bk, key);
-
-//        cout << " --------" << "AND time taken(cudaEvent): " << et << " --------" << endl;
-
+        cudaCheckErrors("starting AND operation");
         sTime = omp_get_wtime();
-        bootsXOR_16(xorResult, a, b, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended, ks_b_gpu,
-                    ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-        eTime = omp_get_wtime();
-        cout << " --------" << "XOR time taken: " << eTime - sTime << " --------" << endl;
-        testCipher("A+B", xorResult, bitSize, bk, key);
+        bootsAND_fullGPU_n_Bit(andResult, a, b, bitSize, cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+//        bootsAND_fullGPU_1_Bit_Stream(andResult, a, b, bitSize, cudaBkFFTCoalesceExt, ks_a_gpu_extendedPtr,
+//                                ks_b_gpu_extendedPtr);
+        cout << "AND time taken:\t" << omp_get_wtime() - sTime << endl;
     }
-    testCipher("AB", andResult, bitSize, bk, key);
+    testCipher("A . B", andResult, bitSize, bk, key);
+
+    cout << "-----Starting XOR operation-----" << endl;
+    for (int i = 0; i < nExp; ++i) {
+        cudaCheckErrors("starting XOR operation");
+        sTime = omp_get_wtime();
+        bootsXOR_fullGPU_n_Bit(xorResult, a, b, bitSize, cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+//        bootsAND_fullGPU_1_Bit_Stream(andResult, a, b, bitSize, cudaBkFFTCoalesceExt, ks_a_gpu_extendedPtr,
+//                                ks_b_gpu_extendedPtr);
+        cout << "XOR time taken:\t" << omp_get_wtime() - sTime << endl;
+    }
+    testCipher("A + B", xorResult, bitSize, bk, key);
 
 
     //ANDXOR Together
-    result = convertBitToNumberZero_GPU(bitSize * nOutputs, bk);
+    cout << "-----Starting AND XOR operation-----" << endl;
     for (int i = 0; i < nExp; ++i) {
-        double sTime = omp_get_wtime();
-        bootsANDXOR_16(result, a, b, nOutputs, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended,
-                       ks_b_gpu,
-                       ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-        double eTime = omp_get_wtime();
-        cout << " --------" << "ANDXOR time taken: " << eTime - sTime << " --------" << endl;
+        int vLength = 1;
+        cudaCheckErrors("starting AND XOR operation");
+        sTime = omp_get_wtime();
+        bootsANDXOR_fullGPU_n_Bit_vector(andxorResult, a, b, vLength, bitSize, cudaBkFFTCoalesceExt,
+                                         ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+        cout << "AND XOR time taken:\t" << omp_get_wtime() - sTime << endl;
+    }
+    //split the result
+    cudaMemcpy(andResult->a, andxorResult->a, bitSize * n * sizeof(int), D2D);
+    memcpy(andResult->b, andxorResult->b, bitSize * sizeof(int));
+    testCipher("A (.) B v2", andResult, bitSize, bk, key);
+
+    cudaMemcpy(xorResult->a, andxorResult->a + (bitSize * n), bitSize * n * sizeof(int), D2D);
+    memcpy(xorResult->b, andxorResult->b + bitSize, bitSize * sizeof(int));
+    testCipher("A (+) B v2", xorResult, bitSize, bk, key);
+
+    //XORXOR Together
+    cout << "-----Starting XOR XOR operation-----" << endl;
+    for (int i = 0; i < nExp; ++i) {
+        int vLength = 1;
+        cudaCheckErrors("starting AND XOR operation");
+        sTime = omp_get_wtime();
+        bootsXORXOR_fullGPU_n_Bit_vector(andxorResult, a, b, a, b, vLength, bitSize, cudaBkFFTCoalesceExt,
+                                         ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+        cout << "XOR XOR time taken:\t" << omp_get_wtime() - sTime << endl;
     }
 
     //split the result
-    cudaMemcpy(andResult->a, result->a, bitSize * in_out_params->n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(andResult->b, result->b, bitSize * sizeof(int));
-    memcpy(andResult->current_variance, result->current_variance, bitSize * sizeof(double));
-    testCipher("AB v2", andResult, bitSize, bk, key);
+    cudaMemcpy(andResult->a, andxorResult->a, bitSize * n * sizeof(int), D2D);
+    memcpy(andResult->b, andxorResult->b, bitSize * sizeof(int));
+    testCipher("A (+) B v2", andResult, bitSize, bk, key);
 
-    cudaMemcpy(xorResult->a, result->a + (bitSize * in_out_params->n), sizeof(int) * bitSize * in_out_params->n,
-               cudaMemcpyDeviceToDevice);
-    memcpy(xorResult->b, result->b + bitSize, bitSize * sizeof(int));
-    memcpy(xorResult->current_variance, result->current_variance + bitSize, bitSize * sizeof(double));
-    testCipher("A+B v2", xorResult, bitSize, bk, key);
+    cudaMemcpy(xorResult->a, andxorResult->a + (bitSize * n), bitSize * n * sizeof(int), D2D);
+    memcpy(xorResult->b, andxorResult->b + bitSize, bitSize * sizeof(int));
+    testCipher("A (+) B v2", xorResult, bitSize, bk, key);
 
     //addition starting
+    cout << "-----Starting Addition (1) operation-----" << endl;
     for (int i = 0; i < nExp; ++i) {
-        double sTime = omp_get_wtime();
-//        taskLevelParallelAdd(andResult, a, b, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended, ks_b_gpu,
-//                             ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-        taskLevelParallelAdd_bitwise(andResult, a, b, 1, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce,
-                                            NULL, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                                            ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-        cout << "--------ADDITION time taken: " << omp_get_wtime() - sTime << " --------" << endl;
-        testCipher("Summation: ", andResult, bitSize, bk, key);
+        sTime = omp_get_wtime();
+        taskLevelParallelAdd_bitwise(additionResult, a, b, bitSize, bk, cudaBkFFTCoalesceExt,
+                                     ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+        cout << "ADDITION (1) time taken:\t" << omp_get_wtime() - sTime << endl;
     }
+    testCipher("A + B (1)", additionResult, bitSize, bk, key);
+
+    cout << "-----Starting Addition (n) operation-----" << endl;
+    for (int i = 0; i < nExp; ++i) {
+        sTime = omp_get_wtime();
+        taskLevelParallelAdd(additionResult, a, b, bitSize, bk, cudaBkFFTCoalesceExt,
+                             ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+        cout << "ADDITION (n) time taken:\t" << omp_get_wtime() - sTime << endl;
+    }
+    testCipher("A + B (n)", additionResult, bitSize, bk, key);
+
+    freeLweSample_16_gpu(a);
+    freeLweSample_16_gpu(b);
+    freeLweSample_16_gpu(additionResult);
+    freeLweSample_16_gpu(andResult);
+    freeLweSample_16_gpu(xorResult);
+    freeLweSample_16_gpu(andxorResult);
 }
 
 
@@ -1699,6 +1315,172 @@ void taskLevelParallelAdd_bitwise_vector(LweSample_16 *mainResult, LweSample_16 
     cudaFree(bi->a);
 }
 
+void taskLevelParallelAdd_bitwise_vector_coalInput(LweSample_16 *result, const LweSample_16 *a, const LweSample_16 *b,
+                                                   const int vLength, const int nBits, const int nCoal,
+                                                   const TFheGateBootstrappingCloudKeySet *bk,
+                                                   cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                                   Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                                                   TFheGateBootstrappingSecretKeySet *key) {
+    const int nOut = 2, n = 500;
+
+    LweSample_16 *r = convertBitToNumberZero_GPU(2 * nCoal * vLength, bk);
+    LweSample_16 *t = convertBitToNumberZero_GPU(2 * nCoal * vLength, bk);
+    LweSample_16 *ai = convertBitToNumberZero_GPU(1 * nCoal * vLength, bk);
+    LweSample_16 *bi = convertBitToNumberZero_GPU(1 * nCoal * vLength, bk);
+//    LweSample_16 *temp = convertBitToNumberZero_GPU(nBits, bk);
+    //pointers
+    LweSample_16 *r1 = new LweSample_16;
+    LweSample_16 *t1 = new LweSample_16;
+
+    t1->a = t->a + nCoal * vLength * n;
+    t1->b = t->b + nCoal * vLength;
+
+    r1->a = r->a + nCoal * vLength * n;
+    r1->b = r->b + nCoal * vLength;
+
+    int bI = 0;
+    for (int i = 0; i < vLength * nCoal; ++i) {
+        cudaMemcpy(ai->a + i * n, a->a + i * nBits * n, n * sizeof(Torus32), D2D);
+        memcpy(ai->b + i, a->b + i * nBits, sizeof(int));
+        /*cudaMemcpy(temp->a, ai->a + i * n, n * sizeof(int), D2D);
+        memcpy(temp->b, ai->b + i, nBits * sizeof(int));
+        testCipher("ai", temp, 1, bk, key);*/
+
+        cudaMemcpy(bi->a + i * n, b->a + i * nBits * n, n * sizeof(Torus32), D2D);
+        memcpy(bi->b + i, b->b + i * nBits, sizeof(int));
+        /*cudaMemcpy(temp->a, bi->a + i * n, n * sizeof(int), D2D);
+        memcpy(temp->b, bi->b + i, nBits * sizeof(int));
+        testCipher("bi", temp, 1, bk, key);*/
+    }
+    bootsANDXOR_fullGPU_n_Bit_vector(r, ai, bi, nCoal * vLength, 1, cudaBkFFTCoalesceExt,
+                                     ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    //test copy r0 to main result
+    for (int i = 0; i < nCoal * vLength; ++i) {
+        cudaMemcpy(result->a + i * nBits * n, r1->a + i * n, n * sizeof(Torus32), D2D);
+        memcpy(result->b + i * nBits, r1->b + i, sizeof(int));
+        /*cudaMemcpy(temp->a, r->a + i * n, n * sizeof(int), D2D);
+        memcpy(temp->b, r->b + i, sizeof(int));
+        testCipher("r0", temp, 1, bk, key);
+
+        cudaMemcpy(temp->a, result->a + i * bitSize * n, n * sizeof(int), D2D);
+        memcpy(temp->b, result->b + i * bitSize, sizeof(int));
+        testCipher("mainResult0", temp, 1, bk, key);*/
+    }
+    cudaMemcpy(r1->a, r->a, nCoal * vLength * n * sizeof(Torus32), D2D);
+    memcpy(r1->b, r->b, nCoal * vLength * sizeof(int));
+
+    /*for (int i = 0; i < vLength; ++i) {
+        cudaMemcpy(temp->a, r1->a + i * n, n * sizeof(int), D2D);
+        memcpy(temp->b, r1->b + i, sizeof(int));
+        testCipher("r1", temp, 1, bk, key);
+    }*/
+    for (bI = 1; bI < nBits; ++bI) {
+        //get ai and bi
+        for (int i = 0; i < nCoal * vLength; ++i) {
+            cudaMemcpy(ai->a + i * n, a->a + i * nBits * n + bI * n, n * sizeof(Torus32), D2D);
+            memcpy(ai->b + i, a->b + i * nBits + bI, sizeof(int));
+
+            cudaMemcpy(bi->a + i * n, b->a + i * nBits * n + bI * n, n * sizeof(Torus32), D2D);
+            memcpy(bi->b + i, b->b + i * nBits + bI, sizeof(int));
+
+            /*cout << "---1---" << endl;
+            cudaMemcpy(temp->a, r1->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, r1->b + i, sizeof(int));
+            testCipher("r1", temp, 1, bk, key);
+
+            cudaMemcpy(temp->a, ai->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, ai->b + i, sizeof(int));
+            testCipher("ai", temp, 1, bk, key);
+
+            cudaMemcpy(temp->a, bi->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, bi->b + i, sizeof(int));
+            testCipher("bi", temp, 1, bk, key);
+            cout << endl;*/
+        }
+
+        bootsXORXOR_fullGPU_n_Bit_vector(t,
+                                         ai, r1,
+                                         bi, r1,
+                                         nCoal * vLength, 1, cudaBkFFTCoalesceExt,
+                                         ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+        /*for (int i = 0; i < vLength; ++i) {
+            cout << "ai xor r1" << endl;
+            cudaMemcpy(temp->a, t->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, t->b + i, sizeof(int));
+            testCipher("t0", temp, 1, bk, key);
+
+            cout << "bi xor r1" << endl;
+            cudaMemcpy(temp->a, t->a + i * n + vLength * n, n * sizeof(int), D2D);
+            memcpy(temp->b, t->b + i + vLength, sizeof(int));
+            testCipher("t1", temp, 1, bk, key);
+            cout << endl;
+        }
+        cout << "---2---" << endl;*/
+
+        bootsAND_fullGPU_n_Bit(t,
+                               t, t1,
+                               1 * nCoal * vLength,
+                               cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+        /*for (int i = 0; i < vLength; ++i) {
+            cout << "t0 = t0 and t1" << endl;
+            cudaMemcpy(temp->a, t->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, t->b + i, sizeof(int));
+            testCipher("t0", temp, 1, bk, key);
+            cout << endl;
+        }*/
+        bootsXORXOR_fullGPU_n_Bit_vector(r,
+                                         ai, t1,
+                                         t, r1,
+                                         nCoal * vLength, 1, cudaBkFFTCoalesceExt,
+                                         ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+        for (int i = 0; i < nCoal * vLength; ++i) {
+            //copy to the result
+            cudaMemcpy(result->a + i * nBits * n + bI * n, r->a + i * n, n * sizeof(int), D2D);
+            memcpy(result->b + i * nBits + bI, r->b + i, sizeof(int));
+
+            /*cout << "---3---" << endl;
+            cout << "ai xor t1" << endl;
+            cudaMemcpy(temp->a, a->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, a->b + i, sizeof(int));
+            testCipher("ai", temp, 1, bk, key);
+
+            cudaMemcpy(temp->a, t1->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, t1->b + i, sizeof(int));
+            testCipher("t1", temp, 1, bk, key);
+
+            cudaMemcpy(temp->a, r->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, r->b + i, sizeof(int));
+            testCipher("r0", temp, 1, bk, key);
+
+            cout << "t0 xor r1" << endl;
+            cudaMemcpy(temp->a, t->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, t->b + i, sizeof(int));
+            testCipher("t0", temp, 1, bk, key);
+            cout << "prev r1 in first line" << endl;
+
+            cudaMemcpy(temp->a, r1->a + i * n, n * sizeof(int), D2D);
+            memcpy(temp->b, r1->b + i, sizeof(int));
+            testCipher("r1", temp, 1, bk, key);
+            cout << "action: copy r0 to result" << endl;
+            cout << endl;*/
+        }
+    }
+
+
+    //free memories
+    freeLweSample_16_gpu(r);
+    freeLweSample_16_gpu(t);
+    freeLweSample_16_gpu(ai);
+    freeLweSample_16_gpu(bi);
+
+    //pointers
+    delete r1;
+    delete t1;
+}
+
 void BOOTS_Add_vector_bitwise(LweSample_16 *output, LweSample_16 **input, int vecSize, int bitSize, int nCoal,
                       const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex ****cudaBkFFT,
                       cufftDoubleComplex ***cudaBkFFTCoalesce, Torus32 ****ks_a_gpu, Torus32 ****ks_a_gpu_extended,
@@ -1807,152 +1589,384 @@ void BOOTS_Add_vector_bitwise(LweSample_16 *output, LweSample_16 **input, int ve
 }
 
 
-void multiplyLweSamples(LweSample_16 *cudaRes, LweSample_16 *a, LweSample_16 *b, int bitSize,
+void BOOTS_vectorAddition(LweSample_16 **result,
+                          LweSample_16 **inputA, LweSample_16 **inputB,
+                          const int nCoal, const int vLength, const int nBits,
+                          const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                          Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                          TFheGateBootstrappingSecretKeySet *key) {
+
+    const int n = 500;
+    //combine the numbers
+    LweSample_16 *data1 = convertBitToNumberZero_GPU(nCoal * nBits * vLength, bk);
+    LweSample_16 *data2 = convertBitToNumberZero_GPU(nCoal * nBits * vLength, bk);
+    LweSample_16 *dataRes = convertBitToNumberZero_GPU(nCoal * nBits * vLength, bk);
+    LweSample_16 *temp = convertBitToNumberZero_GPU(nBits, bk);
+
+    for (int i = 0; i < vLength; ++i) {
+        cudaMemcpy(data1->a + (i * nCoal * nBits * n), inputA[i]->a, nCoal * nBits * n * sizeof(int), D2D);
+        memcpy(data1->b + (i * nCoal * nBits), inputA[i]->b, nCoal * nBits * sizeof(int));
+
+        /*for (int j = 0; j < nCoal; ++j) {
+            cudaMemcpy(testingData->a, data1->a + (i * nCoal * nBits * n) + j * nBits * n, nBits * n * sizeof(int),
+                       D2D);
+            memcpy(testingData->b, data1->b + (i * nBits * nCoal) + j * nBits, nBits * sizeof(int));
+            testCipher("d1", testingData, nBits, bk, key);
+        }*/
+
+        cudaMemcpy(data2->a + (i * nCoal * nBits * n), inputB[i]->a, nCoal * nBits * n * sizeof(int), D2D);
+        memcpy(data2->b + (i * nCoal * nBits), inputB[i]->b, nCoal * nBits * sizeof(int));
+
+        /*for (int j = 0; j < nCoal; ++j) {
+            cudaMemcpy(testingData->a, data2->a + (i * nCoal * nBits * n) + j * nBits * n, nBits * n * sizeof(int),
+                       D2D);
+            memcpy(testingData->b, data2->b + (i * nBits * nCoal) + j * nBits, nBits * sizeof(int));
+            testCipher("d2", testingData, nBits, bk, key);
+        }
+        cout << endl;*/
+    }
+
+    taskLevelParallelAdd_bitwise_vector_coalInput(dataRes, data1, data2,
+                                                  vLength, nBits, nCoal,
+                                                  bk, cudaBkFFTCoalesceExt,
+                                                  ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    for (int i = 0; i < vLength; ++i) {
+        cudaMemcpy(result[i]->a, dataRes->a + (i * nCoal * nBits * n), nCoal * nBits * n * sizeof(int), D2D);
+        memcpy(result[i]->b, dataRes->b + i * nCoal * nBits, nCoal * nBits * sizeof(int));
+    }
+
+    //free memory
+    freeLweSample_16_gpu(data1);
+    freeLweSample_16_gpu(data2);
+    freeLweSample_16_gpu(dataRes);
+    freeLweSample_16_gpu(temp);
+}
+
+__constant__ int n = 500;
+
+__global__ void leftShiftExpandedFormatForMultiplicationKernel(Torus32 *destination, Torus32 *source, int inputBit, int outputBit) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register int index = id / (n * inputBit);
+    register int dstStart = index * outputBit * n;
+    register int idMod = id % (n * inputBit);
+    register int shiftPortion = index * n;
+    destination[dstStart + idMod  + shiftPortion] = source[id];
+}
+
+__global__ void leftShiftExpandedFormatForMultiplicationKernel_single(Torus32 *destination, Torus32 *source, int nBits) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register int nBitShift = id / (n * nBits);
+    register int bIndex = (id / n) % nBits;
+    register int newVal = bIndex < nBitShift ? 0 : source[id - n * nBitShift];
+    destination[id] = newVal;
+}
+
+__global__ void leftShiftExpandedFormatForMultiplicationKernel_single_vector(Torus32 *destination, Torus32 *source, int vLength, int nBits) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register int nBitShift = id / (n * nBits * vLength);
+    register int bIndex = (id / n) % nBits;
+    register int newVal = bIndex < nBitShift ? 0 : source[id - n * nBitShift];
+    destination[id] = newVal;
+}
+
+void leftShiftExpandedFormatForMultiplication(LweSample_16 *andLShifExpanded, LweSample_16 *andExpanded,
+                                              int inputBit, int outputBit) {
+    const int n = 500, nThreads = 1024;
+    int nBlocks = (int) ceil((float) (inputBit * inputBit * n) / nThreads);
+    leftShiftExpandedFormatForMultiplicationKernel<<<nBlocks, nThreads>>>
+                                                              (andLShifExpanded->a,
+                                                                      andExpanded->a,
+                                                                      inputBit, outputBit);
+    for (int i = 0; i < inputBit; ++i) {
+        memcpy(andLShifExpanded->b + i * outputBit + i, andExpanded->b + i * inputBit, inputBit * sizeof(int));
+    }
+}
+
+void leftShiftExpandedFormatForMultiplication(LweSample_16 *andLShifExpanded, LweSample_16 *andExpanded,
+                                              int inputBit, int outputBit, bool isDoublePrecision) {
+    const int n = 500, nThreads = 1024;
+    int nBlocks = (int) ceil((float) (inputBit * inputBit * n) / nThreads);
+    if (isDoublePrecision) {
+        leftShiftExpandedFormatForMultiplicationKernel<<<nBlocks, nThreads>>>
+                                                                  (andLShifExpanded->a,
+                                                                          andExpanded->a,
+                                                                          inputBit, outputBit);
+    } else {
+        leftShiftExpandedFormatForMultiplicationKernel_single<<<nBlocks, nThreads>>>
+                                                                  (andLShifExpanded->a,
+                                                                          andExpanded->a,
+                                                                          inputBit);
+    }
+
+    for (int i = 0; i < inputBit; ++i) {
+        if (isDoublePrecision) {
+            memcpy(andLShifExpanded->b + i * outputBit + i, andExpanded->b + i * inputBit, inputBit * sizeof(int));
+        } else {
+            memcpy(andLShifExpanded->b + i * inputBit + i, andExpanded->b + i * inputBit,
+                   (inputBit - i) * sizeof(int));
+        }
+    }
+
+}
+
+__global__ void leftShiftExpandedFormatForMultiplicationKernel(Torus32 *destination, Torus32 *source, int vlength, int inputBit, int outputBit) {
+    register int id = blockIdx.x * blockDim.x + threadIdx.x;
+    register int index = id / (n * inputBit);
+    register int dstStart = index * outputBit * n;
+    register int idMod = id % (n * inputBit);
+    register int shiftPortion = (index/vlength) * n;//(index % inputBit) * n;
+    destination[dstStart + idMod  + shiftPortion] = source[id];
+}
+
+void leftShiftExpandedFormatForMultiplication(LweSample_16 *andLShifExpanded, LweSample_16 *andExpanded,
+                                              int vLength, int inputBit, int outputBit) {
+    const int n = 500, nThreads = 1024;
+    int nBlocks = (int) ceil((float) (vLength * inputBit * inputBit * n) / nThreads);
+    leftShiftExpandedFormatForMultiplicationKernel<<<nBlocks, nThreads>>>
+                                                              (andLShifExpanded->a,
+                                                                      andExpanded->a,
+                                                                      vLength,
+                                                                      inputBit, outputBit);
+    for (int i = 0; i < inputBit; ++i) {
+        for (int j = 0; j < vLength; ++j) {
+            memcpy(andLShifExpanded->b + i * vLength * outputBit + j * outputBit + i,
+                   andExpanded->b + i * vLength * inputBit + j * inputBit,
+                   inputBit * sizeof(int));
+        }
+    }
+}
+
+void leftShiftExpandedFormatForMultiplication_precision(LweSample_16 *andLShifExpanded, LweSample_16 *andExpanded,
+                                              int vLength, int inputBit, int outputBit, bool isDoublePrecision) {
+    const int n = 500, nThreads = 1024;
+    int nBlocks = (int) ceil((float) (vLength * inputBit * inputBit * n) / nThreads);
+    if (isDoublePrecision) {
+        leftShiftExpandedFormatForMultiplicationKernel<<<nBlocks, nThreads>>>
+                                                                  (andLShifExpanded->a,
+                                                                          andExpanded->a,
+                                                                          vLength,
+                                                                          inputBit, outputBit);
+    } else {
+        leftShiftExpandedFormatForMultiplicationKernel_single_vector<<<nBlocks, nThreads>>>
+                                                                                (andLShifExpanded->a,
+                                                                                        andExpanded->a,
+                                                                                        vLength,
+                                                                                        inputBit);
+    }
+    for (int i = 0; i < inputBit; ++i) {
+        for (int j = 0; j < vLength; ++j) {
+            if (isDoublePrecision) {
+                memcpy(andLShifExpanded->b + i * vLength * outputBit + j * outputBit + i,
+                       andExpanded->b + i * vLength * inputBit + j * inputBit,
+                       inputBit * sizeof(int));
+            } else {
+                memcpy(andLShifExpanded->b + i * vLength * outputBit + j * outputBit + i,
+                       andExpanded->b + i * vLength * inputBit + j * inputBit,
+                       (inputBit - i) * sizeof(int));
+            }
+        }
+    }
+}
+
+void multiplyLweSamples(LweSample_16 *result, LweSample_16 *a, LweSample_16 *b, int nBits, bool isDoublePrecision,
                         const TFheGateBootstrappingCloudKeySet *bk,
-                        cufftDoubleComplex ****cudaBkFFT, cufftDoubleComplex ****cudaBkFFT_x2,
-                        cufftDoubleComplex ***cudaBkFFTCoalesce, cufftDoubleComplex ***cudaBkFFTCoalesce_x2,
-                        Torus32 ****ks_a_gpu,
-                        Torus32 ****ks_a_gpu_extended, Torus32 ****ks_a_gpu_extended_x2,
-                        int ***ks_b_gpu, double ***ks_cv_gpu,
-                        Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr, double *ks_cv_gpu_extendedPtr,
+                        cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                        Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
                         TFheGateBootstrappingSecretKeySet *key) {
+    assert(nBits % 2 == 0);//nBits has to be even for multuplication
     //divide the numbers into bitsize numbers
-    int nInputBits = bitSize, nOutputBits = 2 * bitSize;
+    const int n = 500, iBits = nBits, oBits = isDoublePrecision ? nBits * 2 : nBits;
+    //expand a and b
+    LweSample_16 *aExpanded = convertBitToNumberZero_GPU(iBits * iBits, bk);
+    LweSample_16 *bExpanded = convertBitToNumberZero_GPU(iBits * iBits, bk);
+//    LweSample_16 *andExpanded = convertBitToNumberZero_GPU(iBits * iBits, bk);
+    LweSample_16 *andLShiftExp = convertBitToNumberZero_GPU(iBits * oBits, bk);
+    LweSample_16 *iResult = convertBitToNumberZero_GPU(iBits / 2 * oBits, bk);
+    //andLShifExpanded = 0
+    cudaMemset(andLShiftExp->a, 0, iBits * oBits * n * sizeof(Torus32));
+    //temp
+    LweSample_16 *temp = convertBitToNumberZero_GPU(iBits, bk);
+    LweSample_16 *temp2 = convertBitToNumberZero_GPU(oBits, bk);
 
-    LweSample_16 **andRes = new LweSample_16 *[nInputBits];
-    LweSample_16 **andResShifted = new LweSample_16 *[nInputBits];//nInputBits
+    for (int i = 0; i < iBits; ++i) {
+        cudaMemcpy(aExpanded->a + i * iBits * n, a->a, iBits * n * sizeof(Torus32), D2D);
+        memcpy(aExpanded->b + i * iBits, a->b, iBits * sizeof(int));
 
-
-//    double sT  = omp_get_wtime();
-    for (int bIndex = 0; bIndex < nInputBits; ++bIndex) {//nInputBits
-        andRes[bIndex] = convertBitToNumberZero_GPU(nOutputBits, bk);
-        cudaMemset(andRes[bIndex]->a, 0, nOutputBits * bk->params->in_out_params->n * sizeof(int));
-        andResShifted[bIndex] = convertBitToNumberZero_GPU(nOutputBits, bk);
-
-        bootsAND_MULT(andRes[bIndex], a, b, nInputBits, nInputBits, bIndex, bk, cudaBkFFT, cudaBkFFTCoalesce,
-                      ks_a_gpu,
-                      ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr,
-                      ks_cv_gpu_extendedPtr);
-
-        leftShiftCuda_16(andResShifted[bIndex], andRes[bIndex], nOutputBits, bIndex, bk);
-//        testCipher("and ", andRes[bIndex], nOutputBits, bk, key);
-//        testCipher("and Shifted ", andResShifted[bIndex], nOutputBits, bk, key);
+        for (int j = 0; j < iBits; ++j) {
+            cudaMemcpy(bExpanded->a + i * iBits * n + j * n, b->a + i * n, n * sizeof(Torus32), D2D);
+            memcpy(bExpanded->b + i * iBits + j, b->b + i, sizeof(int));
+        }
     }
 
+    /*for (int i = 0; i < iBits; ++i) {
+        cudaMemcpy(temp->a, aExpanded->a + i * iBits * n, iBits * n * sizeof(Torus32), D2D);
+        memcpy(temp->b, aExpanded->b + i * iBits, iBits * sizeof(int));
+        testCipher("a", temp, iBits, bk, key);
 
-    //this is new implementation using bitwise addition
-            int nCoal = 1;
-    BOOTS_Add_vector_bitwise(cudaRes, andResShifted, nInputBits, nOutputBits, nCoal, bk, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu,
-                     ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-//            testCipher("cudres", cudaRes, nOutputBits, bk, key);
+        cudaMemcpy(temp->a, bExpanded->a + i * iBits * n, iBits * n * sizeof(Torus32), D2D);
+        memcpy(temp->b, bExpanded->b + i * iBits, iBits * sizeof(int));
+        testCipher("b", temp, iBits, bk, key);
+        cout << endl;
+    }*/
 
-    //this is using 16 bit shifting addition
-//    BOOTS_Add_vector(cudaRes, andResShifted, nInputBits, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu,
-//                     ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-    for (int bIndex = 0; bIndex < nInputBits; ++bIndex) {
-        cudaFree(andRes[bIndex]->a);
-        cudaFree(andResShifted[bIndex]->a);
+    bootsAND_fullGPU_n_Bit(aExpanded, aExpanded, bExpanded,
+                           iBits * iBits, cudaBkFFTCoalesceExt,
+                           ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    leftShiftExpandedFormatForMultiplication(andLShiftExp, aExpanded, iBits, oBits, isDoublePrecision);
+
+    /*for (int i = 0; i < iBits; ++i) {
+        cudaMemcpy(temp2->a, andLShiftExp->a + i * oBits * n, oBits * n * sizeof(Torus32), D2D);
+        memcpy(temp2->b, andLShiftExp->b + i * oBits, oBits * sizeof(int));
+        testCipher("&S", temp2, oBits, bk, key);
     }
-    free(andRes);
-    free(andResShifted);
+    cout << endl;*/
+
+    //free a and b
+    freeLweSample_16_gpu(aExpanded);
+    freeLweSample_16_gpu(bExpanded);
+
+    int vLength = iBits / 2, nCoal = 1;
+    LweSample_16 *initAndShiftExp = andLShiftExp;
+    LweSample_16 *halfLeAndShiftExp = new LweSample_16;
+    //set half len
+    halfLeAndShiftExp->a = andLShiftExp->a + vLength * oBits * n;
+    halfLeAndShiftExp->b = andLShiftExp->b + vLength * oBits;
+    for (int i = 0; vLength > 0; i++) {
+        //add
+        taskLevelParallelAdd_bitwise_vector_coalInput(iResult, initAndShiftExp, halfLeAndShiftExp,
+                                                      vLength, oBits, nCoal,
+                                                      bk, cudaBkFFTCoalesceExt,
+                                                      ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+
+        /*for (int i = 0; i < vLength; ++i) {
+            cudaMemcpy(temp2->a, iResult->a + i * oBits * n, oBits * n * sizeof(Torus32), D2D);
+            memcpy(temp2->b, iResult->b + i * oBits, oBits * sizeof(int));
+            testCipher("output", temp2, oBits, bk, key);
+        }
+        cout << endl;*/
+
+        vLength /= 2;
+        initAndShiftExp = iResult;
+        halfLeAndShiftExp->a = iResult->a + vLength * oBits * n;
+        halfLeAndShiftExp->b = iResult->b + vLength * oBits;
+
+        if (i == 0) {
+            freeLweSample_16_gpu(andLShiftExp);
+        }
+    }
+
+    cudaMemcpy(result->a, iResult->a, oBits * n * sizeof(Torus32), D2D);
+    memcpy(result->b, iResult->b, oBits * sizeof(int));
+
+//    freeLweSample_16_gpu(andExpanded);
+    freeLweSample_16_gpu(iResult);
+    freeLweSample_16_gpu(temp);
+    freeLweSample_16_gpu(temp2);
+    delete halfLeAndShiftExp;
 }
 
 
-void test_vectorAddition(LweSample *ca, LweSample *cb, int bitSize,
-                        const TFheGateBootstrappingCloudKeySet *bk,
-                        TFheGateBootstrappingSecretKeySet *key) {
+void test_vectorAddition(LweSample *ca, LweSample *cb, int nBits,
+                         const TFheGateBootstrappingCloudKeySet *bk,
+                         cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                         Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                         TFheGateBootstrappingSecretKeySet *key) {
 
-    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(1, bk);
     const int n = 500;
-
-    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, bk);
-    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(bk);
-    double *ks_cv_gpu_extendedPtr = sendKeySwitchCVtoGPUOnePtr(bk);
-
-    LweSample_16 *a = convertBitToNumber(ca, bitSize, bk);
-    LweSample_16 *b = convertBitToNumber(cb, bitSize, bk);
-    LweSample_16 *result = convertBitToNumberZero_GPU(bitSize, bk);//2*inputBitSize
+    LweSample_16 *a = convertBitToNumber(ca, nBits, bk);
+    LweSample_16 *b = convertBitToNumber(cb, nBits, bk);
 
     int *temp;
     temp = a->a;
-    cudaMalloc(&(a->a), bitSize * n * sizeof(int));
-    cudaMemcpy(a->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&(a->a), nBits * n * sizeof(int));
+    cudaMemcpy(a->a, temp, nBits * n * sizeof(int), H2D);
     free(temp);
 
     temp = b->a;
-    cudaMalloc(&(b->a), bitSize * n * sizeof(int));
-    cudaMemcpy(b->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&(b->a), nBits * n * sizeof(int));
+    cudaMemcpy(b->a, temp, nBits * n * sizeof(int), H2D);
     free(temp);
-
 
     //vector addition
-    int vecLen = 4;
-    LweSample_16 **input = new LweSample_16*[vecLen];
-    for (int i = 0; i < vecLen/2; ++i) {
-        input[i] = convertBitToNumberZero_GPU(bitSize, bk);
-        cudaMemcpy(input[i]->a, a->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(input[i]->b, a->b, bitSize * sizeof(int));
+    int vLength = 16;
+    LweSample_16 **inputA = new LweSample_16*[vLength];
+    LweSample_16 **inputB = new LweSample_16*[vLength];
+    LweSample_16 **result = new LweSample_16*[vLength];
+    for (int i = 0; i < vLength; ++i) {
+        inputA[i] = convertBitToNumberZero_GPU(nBits, bk);
+        cudaMemcpy(inputA[i]->a, a->a, nBits * n * sizeof(int), D2D);
+        memcpy(inputA[i]->b, a->b, nBits * sizeof(int));
+        testCipher("intput A", inputA[i], nBits, bk, key);
 
+        inputB[i] = convertBitToNumberZero_GPU(nBits, bk);
+        leftShiftCuda_16(inputB[i], inputA[i], nBits, i % 10, bk);
+//        cudaMemcpy(inputB[i]->a, b->a, nBits * n * sizeof(int), D2D);
+//        memcpy(inputB[i]->b, b->b, nBits * sizeof(int));
+        testCipher("intput B", inputB[i], nBits, bk, key);
 
-        int j = i + vecLen/2;
-        input[j] = convertBitToNumberZero_GPU(bitSize, bk);
-        cudaMemcpy(input[j]->a, b->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(input[j]->b, b->b, bitSize * sizeof(int));
-
+        result[i] = convertBitToNumberZero_GPU(nBits, bk);
     }
 
-    BOOTS_Add_vector_bitwise(result, input, vecLen, bitSize, 1, bk, NULL, cudaBkFFTCoalesce, NULL,
-                             NULL, NULL, NULL, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr,
-                             ks_cv_gpu_extendedPtr, key);
+    cout << "Vector Addition" << endl;
+    double sT = omp_get_wtime();
+    BOOTS_vectorAddition(result, inputA, inputB,
+                                 1, vLength, nBits,
+                                 bk, cudaBkFFTCoalesceExt,
+                                 ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    cout << "Vector Length: " << vLength << " Time Taken: " << omp_get_wtime() - sT << endl;
+
+    for (int i = 0; i < vLength; ++i) {
+        testCipher("result", result[i], nBits, bk, key);
+    }
+
+    //free memory
+    for (int i = 0; i < vLength; ++i) {
+        freeLweSample_16_gpu(inputA[i]);
+        freeLweSample_16_gpu(inputB[i]);
+        freeLweSample_16_gpu(result[i]);
+    }
+    freeLweSample_16_gpu(a);
+    freeLweSample_16_gpu(b);
 
 }
 
-void multiplyLweSamples_test(LweSample *ca, LweSample *cb, int bitSize,
+void multiplyLweSamples_test(LweSample *ca, LweSample *cb, int nBits,
                              const TFheGateBootstrappingCloudKeySet *bk,
+                             cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                             Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
                              TFheGateBootstrappingSecretKeySet *key) {
-    int inputBitSize = bitSize, outputBitSize = bitSize * 2;
 
-    cufftDoubleComplex ****cudaBkFFT = NULL;//sendBootstrappingKeyToGPU(inputBitSize, bk);
-    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(1, bk);
-    Torus32 ****ks_a_gpu_extended = NULL;//sendKeySwitchKeyToGPU_extended(inputBitSize, bk);
+    const int iBits = nBits, n = 500;
+    int *temp;//pointer
+    int isDoublePrecision = false;
+    const int oBits = isDoublePrecision ? nBits * 2 : nBits;
 
-    cufftDoubleComplex ****cudaBkFFT_x2 = NULL;//sendBootstrappingKeyToGPU(outputBitSize, bk);
-    cufftDoubleComplex ***cudaBkFFTCoalesce_x2 = NULL;// sendBootstrappingKeyToGPUCoalesce(outputBitSize, bk);
-    Torus32 ****ks_a_gpu_extended_x2 = NULL;//sendKeySwitchKeyToGPU_extended(outputBitSize, bk);
-
-    int ***ks_b_gpu = NULL;//sendKeySwitchBtoGPU(bk);
-    double ***ks_cv_gpu = NULL;//sendKeySwitchCVtoGPU(bk);
-    const LweParams *in_out_params = bk->params->in_out_params;
-
-    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, bk);
-    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(bk);
-    double *ks_cv_gpu_extendedPtr = sendKeySwitchCVtoGPUOnePtr(bk);
-
-    LweSample_16 *a = convertBitToNumber(ca, inputBitSize, bk);
-    LweSample_16 *b = convertBitToNumber(cb, inputBitSize, bk);
-    LweSample_16 *result = convertBitToNumberZero_GPU(outputBitSize, bk);//2*inputBitSize
-
+    LweSample_16 *a = convertBitToNumber(ca, iBits, bk);
+    LweSample_16 *b = convertBitToNumber(cb, iBits, bk);
     //send a, b, result to cuda
-    int *temp;
     temp = a->a;
-    cudaMalloc(&(a->a), inputBitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(a->a, temp, inputBitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&(a->a), iBits * n * sizeof(int));
+    cudaMemcpy(a->a, temp, iBits * n * sizeof(int), H2D);
     free(temp);
 
     temp = b->a;
-    cudaMalloc(&(b->a), inputBitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(b->a, temp, inputBitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&(b->a), iBits * n * sizeof(int));
+    cudaMemcpy(b->a, temp, iBits * n * sizeof(int), H2D);
     free(temp);
 
 
+    LweSample_16 *result = convertBitToNumberZero_GPU(oBits, bk);
     int startTime = omp_get_wtime();
-    multiplyLweSamples(result, a, b, bitSize, bk, cudaBkFFT, cudaBkFFT_x2, cudaBkFFTCoalesce, cudaBkFFTCoalesce_x2,
-                       NULL, ks_a_gpu_extended, ks_a_gpu_extended_x2, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                       ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);//ks_a_gpu
+    multiplyLweSamples(result, a, b, iBits, isDoublePrecision, bk, cudaBkFFTCoalesceExt,
+                       ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
     cout << "Time Taken To Multiply: " << omp_get_wtime() - startTime << endl;
-    testCipher("multiplication Result", result, outputBitSize, bk, key);
+    testCipher("multiplication Result", result, oBits, bk, key);
 
-    cout << "I am here" << endl;
+    freeLweSample_16_gpu(a);
+    freeLweSample_16_gpu(b);
+    freeLweSample_16_gpu(result);
+
 }
 
 LweSample_16 *padLweSample_16(LweSample_16 *ip, int cLen, int nLen, const TFheGateBootstrappingCloudKeySet *bk) {//assumes the input.a in cuda
@@ -1964,7 +1978,6 @@ LweSample_16 *padLweSample_16(LweSample_16 *ip, int cLen, int nLen, const TFheGa
     memcpy(output->current_variance, ip->current_variance, cLen * sizeof(double));
     return output;
 }
-
 
 __global__ void cudaLeftShift_vector(int *destination, int *source, int vLen, int bitSize, int n, int nBitShift, int length) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2000,18 +2013,6 @@ void leftShiftCuda_16_vector(LweSample_16 *output, LweSample_16 *input, int vLen
     }
 }
 
-//__global__ void expandNbitTo2Nbit_cuda(int *out, int *in, int nInputBitSize, int nOutputBitSize, int n, int length) {
-//    int id = blockIdx.x * blockDim.x + threadIdx.x;
-//    if (id < length) {
-//        out[id] = 0;
-//        int bIndex = (id / n) % nOutputBitSize;
-//        if(bIndex < nInputBitSize) {
-//            int smallIndex = bIndex * n;
-//        }
-//
-//    }
-//}
-
 void expandNbitTo2Nbit(LweSample_16 *out, LweSample_16* in, int nInputBits, int nOutputBits, int nConMul,
                        const TFheGateBootstrappingCloudKeySet *bk) {
 //    cout << "KJHGIVU" << endl;
@@ -2030,193 +2031,301 @@ void expandNbitTo2Nbit(LweSample_16 *out, LweSample_16* in, int nInputBits, int 
 
 }
 
-void concurrentMultiplication(LweSample_16 *result, LweSample_16 **a, LweSample_16 **b, int nConMul, int bitSize,
-                              const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex ****cudaBkFFT,
-                              cufftDoubleComplex ***cudaBkFFTCoalesce, Torus32 ****ks_a_gpu,
-                              Torus32 ****ks_a_gpu_extended, int ***ks_b_gpu, double ***ks_cv_gpu,
-                              Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
-                              double *ks_cv_gpu_extendedPtr, TFheGateBootstrappingSecretKeySet *key) {
-    cout << "***********" << endl;
-    int nOutputBits = bitSize * 2;
-    int n = bk->params->in_out_params->n;
-    LweSample_16 *temp = convertBitToNumberZero_GPU(bitSize, bk);
-    LweSample_16 *temp2 = convertBitToNumberZero_GPU(nOutputBits, bk);
-    LweSample_16 **andRes = new LweSample_16 *[bitSize];
-    LweSample_16 **andResEx = new LweSample_16 *[bitSize];
-    LweSample_16 **andResShifted = new LweSample_16 *[bitSize];
-    /*
-    for (int i = 0; i < nConMul; ++i) {
-        cudaMemcpy(temp->a, a[i]->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(temp->b, a[i]->b, bitSize * sizeof(int));
-        memcpy(temp->current_variance, a[i]->current_variance, bitSize * sizeof(double));
-        testCipher("a0", temp, bitSize, bk, key);
-
-        cudaMemcpy(temp->a, b[i]->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(temp->b, b[i]->b, bitSize * sizeof(int));
-        memcpy(temp->current_variance, b[i]->current_variance, bitSize * sizeof(double));
-        testCipher("b0", temp, bitSize, bk, key);
-    }
-    cout << endl;*/
-
-    LweSample_16 *tempAndDouble = convertBitToNumberZero_GPU(nOutputBits * nConMul, bk);
-    cudaMemset(tempAndDouble->a, 0, nOutputBits * nConMul * n * sizeof(int));
-    for (int bIndex = 0; bIndex < bitSize; ++bIndex) {//bitSize
-        andRes[bIndex] = convertBitToNumberZero_GPU(bitSize * nConMul, bk);
-        andResEx[bIndex] = convertBitToNumberZero_GPU(nOutputBits * nConMul, bk);
-        cudaMemset(andResEx[bIndex]->a, 0, nOutputBits * nConMul * n * sizeof(int));
-        andResShifted[bIndex] = convertBitToNumberZero_GPU(nOutputBits * nConMul, bk);
-//        cout << "concurrentMultiplication: bitSize: " << bitSize << endl;
-        bootsAND_MULT_con(andRes[bIndex], a, b, nConMul, bitSize, bitSize, bIndex, bk, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu,
-                          ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr,
-                          ks_cv_gpu_extendedPtr);
-
-        expandNbitTo2Nbit(andResEx[bIndex], andRes[bIndex], bitSize, nOutputBits, nConMul, bk);
-        //make double of input bits
-        //left shift vector
-        leftShiftCuda_16_vector(andResShifted[bIndex], andResEx[bIndex], nConMul, nOutputBits, bIndex, bk);
-
-        cudaFree(andRes[bIndex]->a);
-        cudaFree(andResEx[bIndex]->a);
-
-//        cout << "----" << "bIndex: " << bIndex << "----" << endl;
-//        for (int i = 0; i < nConMul; ++i) {
-//            cudaMemcpy(temp->a, andRes[bIndex]->a + i * bitSize * n, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//            memcpy(temp->b, andRes[bIndex]->b + i * bitSize, bitSize * sizeof(int));
-//            memcpy(temp->current_variance, andRes[bIndex]->current_variance + i * bitSize, bitSize * sizeof(double));
-//            testCipher("res0", temp, bitSize, bk, key);
+//void concurrentMultiplication(LweSample_16 *result, LweSample_16 **a, LweSample_16 **b, int nConMul, int bitSize,
+//                              const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex ****cudaBkFFT,
+//                              cufftDoubleComplex ***cudaBkFFTCoalesce, Torus32 ****ks_a_gpu,
+//                              Torus32 ****ks_a_gpu_extended, int ***ks_b_gpu, double ***ks_cv_gpu,
+//                              Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+//                              double *ks_cv_gpu_extendedPtr, TFheGateBootstrappingSecretKeySet *key) {
+//    cout << "***********" << endl;
+//    int nOutputBits = bitSize * 2;
+//    int n = bk->params->in_out_params->n;
+//    LweSample_16 *temp = convertBitToNumberZero_GPU(bitSize, bk);
+//    LweSample_16 *temp2 = convertBitToNumberZero_GPU(nOutputBits, bk);
+//    LweSample_16 **andRes = new LweSample_16 *[bitSize];
+//    LweSample_16 **andResEx = new LweSample_16 *[bitSize];
+//    LweSample_16 **andResShifted = new LweSample_16 *[bitSize];
+//    /*
+//    for (int i = 0; i < nConMul; ++i) {
+//        cudaMemcpy(temp->a, a[i]->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
+//        memcpy(temp->b, a[i]->b, bitSize * sizeof(int));
+//        memcpy(temp->current_variance, a[i]->current_variance, bitSize * sizeof(double));
+//        testCipher("a0", temp, bitSize, bk, key);
 //
-//            cudaMemcpy(temp2->a, andResEx[bIndex]->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//            memcpy(temp2->b, andResEx[bIndex]->b + i * nOutputBits, nOutputBits * sizeof(int));
-//            memcpy(temp2->current_variance, andResEx[bIndex]->current_variance + i * nOutputBits, nOutputBits* sizeof(double));
-//            testCipher("res0Ex", temp2, nOutputBits, bk, key);
+//        cudaMemcpy(temp->a, b[i]->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
+//        memcpy(temp->b, b[i]->b, bitSize * sizeof(int));
+//        memcpy(temp->current_variance, b[i]->current_variance, bitSize * sizeof(double));
+//        testCipher("b0", temp, bitSize, bk, key);
+//    }
+//    cout << endl;*/
 //
-//            cudaMemcpy(temp2->a, andResShifted[bIndex]->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//            memcpy(temp2->b, andResShifted[bIndex]->b + i * nOutputBits, nOutputBits * sizeof(int));
-//            memcpy(temp2->current_variance, andResShifted[bIndex]->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
-//            testCipher("resShifted", temp2, nOutputBits, bk, key);
-//            cout << endl;
-//        }
-//        cout << endl;
-    }
-    cout << "bitSize: " << bitSize << endl;
-    cout << "nOutputBits: " << nOutputBits << endl;
-    cout << "reduction start" << endl;
-    cout << "nConMul: " << nConMul << endl;
-//    result = convertBitToNumberZero_GPU(nConMul * nOutputBits, bk);
-    BOOTS_Add_vector_bitwise(result, andResShifted, bitSize, nOutputBits, nConMul, bk, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu,
-                             ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-    cout << "Printing Result: " << endl;
-    cout << "nOutputBits: " << nOutputBits << endl;
-    for (int i = 0; i < nConMul; ++i) {
-        cudaMemcpy(temp2->a, result->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(temp2->b, result->b + i * nOutputBits, nOutputBits * sizeof(int));
-        memcpy(temp2->current_variance, result->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
-        testCipher("in conMul res0", temp2, nOutputBits, bk, key);
+//    LweSample_16 *tempAndDouble = convertBitToNumberZero_GPU(nOutputBits * nConMul, bk);
+//    cudaMemset(tempAndDouble->a, 0, nOutputBits * nConMul * n * sizeof(int));
+//    for (int bIndex = 0; bIndex < bitSize; ++bIndex) {//bitSize
+//        andRes[bIndex] = convertBitToNumberZero_GPU(bitSize * nConMul, bk);
+//        andResEx[bIndex] = convertBitToNumberZero_GPU(nOutputBits * nConMul, bk);
+//        cudaMemset(andResEx[bIndex]->a, 0, nOutputBits * nConMul * n * sizeof(int));
+//        andResShifted[bIndex] = convertBitToNumberZero_GPU(nOutputBits * nConMul, bk);
+////        cout << "concurrentMultiplication: bitSize: " << bitSize << endl;
+//        bootsAND_MULT_con(andRes[bIndex], a, b, nConMul, bitSize, bitSize, bIndex, bk, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu,
+//                          ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr,
+//                          ks_cv_gpu_extendedPtr);
+//
+//        expandNbitTo2Nbit(andResEx[bIndex], andRes[bIndex], bitSize, nOutputBits, nConMul, bk);
+//        //make double of input bits
+//        //left shift vector
+//        leftShiftCuda_16_vector(andResShifted[bIndex], andResEx[bIndex], nConMul, nOutputBits, bIndex, bk);
+//
+//        cudaFree(andRes[bIndex]->a);
+//        cudaFree(andResEx[bIndex]->a);
+//
+////        cout << "----" << "bIndex: " << bIndex << "----" << endl;
+////        for (int i = 0; i < nConMul; ++i) {
+////            cudaMemcpy(temp->a, andRes[bIndex]->a + i * bitSize * n, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
+////            memcpy(temp->b, andRes[bIndex]->b + i * bitSize, bitSize * sizeof(int));
+////            memcpy(temp->current_variance, andRes[bIndex]->current_variance + i * bitSize, bitSize * sizeof(double));
+////            testCipher("res0", temp, bitSize, bk, key);
+////
+////            cudaMemcpy(temp2->a, andResEx[bIndex]->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
+////            memcpy(temp2->b, andResEx[bIndex]->b + i * nOutputBits, nOutputBits * sizeof(int));
+////            memcpy(temp2->current_variance, andResEx[bIndex]->current_variance + i * nOutputBits, nOutputBits* sizeof(double));
+////            testCipher("res0Ex", temp2, nOutputBits, bk, key);
+////
+////            cudaMemcpy(temp2->a, andResShifted[bIndex]->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
+////            memcpy(temp2->b, andResShifted[bIndex]->b + i * nOutputBits, nOutputBits * sizeof(int));
+////            memcpy(temp2->current_variance, andResShifted[bIndex]->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
+////            testCipher("resShifted", temp2, nOutputBits, bk, key);
+////            cout << endl;
+////        }
+////        cout << endl;
+//    }
+//    cout << "bitSize: " << bitSize << endl;
+//    cout << "nOutputBits: " << nOutputBits << endl;
+//    cout << "reduction start" << endl;
+//    cout << "nConMul: " << nConMul << endl;
+////    result = convertBitToNumberZero_GPU(nConMul * nOutputBits, bk);
+//    BOOTS_Add_vector_bitwise(result, andResShifted, bitSize, nOutputBits, nConMul, bk, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu,
+//                             ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
+//    cout << "Printing Result: " << endl;
+//    cout << "nOutputBits: " << nOutputBits << endl;
+//    for (int i = 0; i < nConMul; ++i) {
+//        cudaMemcpy(temp2->a, result->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
+//        memcpy(temp2->b, result->b + i * nOutputBits, nOutputBits * sizeof(int));
+//        memcpy(temp2->current_variance, result->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
+//        testCipher("in conMul res0", temp2, nOutputBits, bk, key);
+//    }
+//
+//    cout << endl;
+//
+//}
+
+void BOOTS_vectorMultiplication(LweSample_16 **result, LweSample_16 **a, LweSample_16 **b,
+                                const int vLength, const int nBits, bool isDoublePrecision,
+                                const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                                TFheGateBootstrappingSecretKeySet *key) {
+    const int iBits = nBits, oBits = isDoublePrecision ? nBits * 2: nBits, n = 500;
+
+    LweSample_16 *aExpanded = convertBitToNumberZero_GPU(vLength * iBits * iBits, bk);
+    LweSample_16 *bExpanded = convertBitToNumberZero_GPU(vLength * iBits * iBits, bk);
+    LweSample_16 *andLShiftExp = convertBitToNumberZero_GPU(vLength * iBits * oBits, bk);
+    LweSample_16 *iResult = convertBitToNumberZero_GPU(vLength * iBits / 2 * oBits, bk);
+    //andLShiftExp = 0
+    cudaMemset(andLShiftExp->a, 0, vLength * iBits * oBits * n * sizeof(Torus32));
+    //temp
+    LweSample_16 *temp = convertBitToNumberZero_GPU(iBits, bk);
+    LweSample_16 *temp2 = convertBitToNumberZero_GPU(oBits, bk);
+
+    //expand a and b
+    for (int i = 0; i < iBits; ++i) {
+        for (int j = 0; j < vLength; ++j) {
+            cudaMemcpy(aExpanded->a + i * vLength * iBits * n + j * iBits * n, a[j]->a, iBits * n * sizeof(Torus32),
+                       D2D);
+            memcpy(aExpanded->b + i * vLength * iBits + j * iBits, a[j]->b, iBits * sizeof(int));
+
+            for (int k = 0; k < iBits; ++k) {
+                cudaMemcpy(bExpanded->a + i * vLength * iBits * n + j * iBits * n + k * n, b[j]->a + i * n,
+                           n * sizeof(Torus32), D2D);
+                memcpy(bExpanded->b + i * vLength * iBits + j * iBits + k, b[j]->b + i, sizeof(int));
+            }
+        }
     }
 
-    cout << endl;
+    bootsAND_fullGPU_n_Bit(aExpanded, aExpanded, bExpanded,
+                           vLength * iBits * iBits, cudaBkFFTCoalesceExt,
+                           ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
 
+    /*for (int i = 0; i < vLength; ++i) {
+        for (int j = 0; j < iBits; ++j) {
+            cudaMemcpy(temp->a, aExpanded->a + i * iBits * iBits * n + j * iBits * n, iBits * n * sizeof(Torus32), D2D);
+            memcpy(temp->b, aExpanded->b + i * iBits * iBits + j * iBits, iBits * sizeof(int));
+            testCipher("a", temp, iBits, bk, key);
+
+            cudaMemcpy(temp->a, bExpanded->a + i * iBits * iBits * n + j * iBits * n, iBits * n * sizeof(Torus32), D2D);
+            memcpy(temp->b, bExpanded->b + i * iBits * iBits + j * iBits, iBits * sizeof(int));
+            testCipher("b", temp, iBits, bk, key);
+
+            cudaMemcpy(temp->a, andExpanded->a + i * iBits * iBits * n + j * iBits * n, iBits * n * sizeof(Torus32), D2D);
+            memcpy(temp->b, andExpanded->b + i * iBits * iBits + j * iBits, iBits * sizeof(int));
+            testCipher("&", temp, iBits, bk, key);
+            cout << endl;
+        }
+        cout << endl;
+    }*/
+
+    leftShiftExpandedFormatForMultiplication_precision(andLShiftExp, aExpanded, vLength, iBits, oBits, isDoublePrecision);
+
+    /*for (int i = 0; i < vLength; ++i) {
+        for (int j = 0; j < iBits; ++j) {
+            cudaMemcpy(temp->a, aExpanded->a + i * iBits * iBits * n + j * iBits * n, iBits * n * sizeof(Torus32), D2D);
+            memcpy(temp->b, aExpanded->b + i * iBits * iBits + j * iBits, iBits * sizeof(int));
+            testCipher("&", temp, iBits, bk, key);
+
+            cudaMemcpy(temp2->a, andLShiftExp->a + i * iBits * oBits * n + j * oBits * n, oBits * n * sizeof(Torus32), D2D);
+            memcpy(temp2->b, andLShiftExp->b + i * iBits * oBits + j * oBits, oBits * sizeof(int));
+            testCipher("&S", temp2, oBits, bk, key);
+            cout << endl;
+        }
+        cout << endl;
+    }*/
+
+    //free a and b
+    freeLweSample_16_gpu(aExpanded);
+    freeLweSample_16_gpu(bExpanded);
+
+    int vLengthCoal = iBits / 2, nCoal = vLength;
+    LweSample_16 *initAndShiftExp = andLShiftExp;
+    LweSample_16 *halfLeAndShiftExp = new LweSample_16;
+
+    //set half len
+    halfLeAndShiftExp->a = andLShiftExp->a + vLengthCoal * vLength * oBits * n;
+    halfLeAndShiftExp->b = andLShiftExp->b + vLengthCoal * vLength * oBits;
+
+    for (int i = 0; vLengthCoal > 0; i++) {
+
+        taskLevelParallelAdd_bitwise_vector_coalInput(iResult, initAndShiftExp, halfLeAndShiftExp,
+                                                      vLengthCoal, oBits, nCoal,
+                                                      bk, cudaBkFFTCoalesceExt,
+                                                      ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+
+        /*for (int j = 0; j < vLengthCoal * nCoal; ++j) {
+            cudaMemcpy(temp2->a, iResult->a + j * oBits * n, oBits * n * sizeof(Torus32), D2D);
+            memcpy(temp2->b, iResult->b + j * oBits, oBits * sizeof(int));
+            testCipher("res", temp2, oBits, bk, key);
+        }
+        cout << endl;*/
+
+        vLengthCoal /= 2;
+        initAndShiftExp = iResult;
+        halfLeAndShiftExp->a = iResult->a + vLengthCoal * vLength * oBits * n;
+        halfLeAndShiftExp->b = iResult->b + vLengthCoal * vLength * oBits;
+        if (i == 0) {
+            freeLweSample_16_gpu(andLShiftExp);
+        }
+    }
+
+    for (int i = 0; i < vLength; ++i) {
+        cudaMemcpy(result[i]->a, iResult->a + i * oBits * n, oBits * n * sizeof(Torus32), D2D);
+        memcpy(result[i]->b, iResult->b + i * oBits, oBits * sizeof(int));
+    }
+
+    //free memory
+    freeLweSample_16_gpu(iResult);
+    freeLweSample_16_gpu(temp);
+    freeLweSample_16_gpu(temp2);
 }
 
-void karatMasterSuba(LweSample_16 *cudaRes, LweSample_16 *a, LweSample_16 *b, int bitSize,
-                        const TFheGateBootstrappingCloudKeySet *bk,
-                        cufftDoubleComplex ****cudaBkFFT, cufftDoubleComplex ****cudaBkFFT_x2,
-                        cufftDoubleComplex ***cudaBkFFTCoalesce, cufftDoubleComplex ***cudaBkFFTCoalesce_x2,
-                        Torus32 ****ks_a_gpu,
-                        Torus32 ****ks_a_gpu_extended, Torus32 ****ks_a_gpu_extended_x2,
-                        int ***ks_b_gpu, double ***ks_cv_gpu,
-                        Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr, double *ks_cv_gpu_extendedPtr,
-                        TFheGateBootstrappingSecretKeySet *key) {
+void karatMasterSuba(LweSample_16 *result, LweSample_16 *a, LweSample_16 *b,
+                     int nBit,
+                     const TFheGateBootstrappingCloudKeySet *bk,
+                     cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                     Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                     TFheGateBootstrappingSecretKeySet *key) {
 
-    //make sure the bitSize is 32
-//    assert(bitSize == BIT_32);
-    int nOutputBits = bitSize * 2;
-    int f_bitSize = bitSize, outputBitSize = bitSize * 2;
-    int h_bitSize = bitSize/2;
-    const LweParams *in_out_params = bk->params->in_out_params;
-    const int n = in_out_params->n;
+    const int n = 500, oBit = nBit * 2, hBit = nBit / 2, fBit = nBit;
 
     //divide the numbers into half bitsize numbers
+    LweSample_16 *Xl = a;
+    LweSample_16 *Xr = new LweSample_16;
+    LweSample_16 *Yl = b;
+    LweSample_16 *Yr = new LweSample_16;
+    LweSample_16 *XYl = convertBitToNumberZero_GPU(fBit, bk);
+    LweSample_16 *XYr = convertBitToNumberZero_GPU(fBit, bk);
 
-    LweSample_16 *Xl = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *Xr = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *Yl = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *Yr = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *XYl = convertBitToNumberZero_GPU(f_bitSize, bk);
-    LweSample_16 *XYr = convertBitToNumberZero_GPU(f_bitSize, bk);
+    LweSample_16 *P3 = convertBitToNumberZero_GPU(fBit, bk);
+    LweSample_16 *P3_1 = P3;
+    LweSample_16 *P3_2 = new LweSample_16;
+    LweSample_16 *PE = convertBitToNumberZero_GPU(2 * fBit, bk);
+    LweSample_16 *PE_1 = convertBitToNumberZero_GPU(2 * fBit, bk);
+    LweSample_16 *PE_2 = convertBitToNumberZero_GPU(2 * fBit, bk);
+    LweSample_16 *E_ADD = PE;
 
-    LweSample_16 *P1 = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *P2 = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *P3_1 = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *P3_2 = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *P3 = convertBitToNumberZero_GPU(f_bitSize, bk);
-    LweSample_16 *E_ADD = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *E_1sComplement = convertBitToNumberZero_GPU(f_bitSize, bk);
-    LweSample_16 *E_MUL = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *E_ONE = convertBitToNumberZero_GPU(f_bitSize, bk);
-    LweSample_16 *E = convertBitToNumberZero_GPU(f_bitSize, bk);
-    LweSample_16 *E_padded = convertBitToNumberZero_GPU(2 * f_bitSize, bk);
-    LweSample_16 *P2padded = convertBitToNumberZero_GPU(f_bitSize, bk);
+    LweSample_16 *E_1sComplement = convertBitToNumberZero_GPU(fBit, bk);
+    LweSample_16 *E_ONE = convertBitToNumberZero_GPU(fBit, bk);
+    LweSample_16 *E = convertBitToNumberZero_GPU(fBit, bk);
 
-    LweSample_16 *temp = convertBitToNumberZero_GPU(h_bitSize, bk);
-    LweSample_16 *temp2 = convertBitToNumberZero_GPU(f_bitSize, bk);
+    LweSample_16 *temp = convertBitToNumberZero_GPU(hBit, bk);
+    LweSample_16 *temp2 = convertBitToNumberZero_GPU(fBit, bk);
 
     int nConMul = 3;
-    LweSample_16 *conMulRes = convertBitToNumberZero_GPU(f_bitSize * nConMul, bk);
-    LweSample_16 **input1 = new LweSample_16*[nConMul];
-    LweSample_16 **input2 = new LweSample_16*[nConMul];
+    LweSample_16 **input1 = new LweSample_16 *[nConMul];
+    LweSample_16 **input2 = new LweSample_16 *[nConMul];
+    LweSample_16 **conMulRes = new LweSample_16 *[nConMul];
 
-
-
-    cudaMemset(E_padded->a, 0, f_bitSize * n * sizeof(int));
-    cudaMemset(P2padded->a, 0, f_bitSize * n * sizeof(int));
-
-    Torus32 MU = modSwitchToTorus32(1, 8);
+    //E_ONE = 1
+    static Torus32 MU = modSwitchToTorus32(1, 8);
     E_ONE->b[0] = MU;
 
+    Xr->a = a->a + hBit * n;
+    Xr->b = a->b + hBit;
 
-    cudaFree(Xl->a);
-    cudaFree(P3_1->a);
-    cudaFree(P3_2->a);
-    free(Xl->b);
-    free(Xl->current_variance);
-    cudaFree(Yl->a);
-    free(Yl->b);
-    free(Yl->current_variance);
+    Yr->a = b->a + hBit * n;
+    Yr->b = b->b + hBit;
 
-    Xl = a;
-    Yl = b;
+    cudaMemcpy(XYl->a, Xl->a, hBit * n * sizeof(int), D2D);
+    memcpy(XYl->b, Xl->b, hBit * sizeof(int));
 
-    Xr->a = a->a + h_bitSize * n;
-    Xr->b = a->b + h_bitSize;
-    Xr->current_variance = a->current_variance + h_bitSize;
+    cudaMemcpy(XYl->a + hBit * n, Yl->a, hBit * n * sizeof(int), D2D);
+    memcpy(XYl->b + hBit, Yl->b, hBit * sizeof(int));
 
-    Yr->a = b->a + h_bitSize * n;
-    Yr->b = b->b + h_bitSize;
-    Yr->current_variance = b->current_variance + h_bitSize;
+    cudaMemcpy(XYr->a, Xr->a, hBit * n * sizeof(int), D2D);
+    memcpy(XYr->b, Xr->b, hBit * sizeof(int));
 
-    cudaMemcpy(XYl->a, Xl->a, h_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(XYl->b, Xl->b, h_bitSize * sizeof(int));
-    memcpy(XYl->current_variance, Xl->current_variance, h_bitSize * sizeof(double));
-    cudaMemcpy(XYl->a + h_bitSize * n, Yl->a, h_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(XYl->b + h_bitSize, Yl->b, h_bitSize * sizeof(int));
-    memcpy(XYl->current_variance + h_bitSize, Yl->current_variance, h_bitSize * sizeof(double));
+    cudaMemcpy(XYr->a + hBit * n, Yr->a, hBit * n * sizeof(int), D2D);
+    memcpy(XYr->b + hBit, Yr->b, hBit * sizeof(int));
 
-    cudaMemcpy(XYr->a, Xr->a, h_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(XYr->b, Xr->b, h_bitSize * sizeof(int));
-    memcpy(XYr->current_variance, Xr->current_variance, h_bitSize * sizeof(double));
-    cudaMemcpy(XYr->a + h_bitSize * n, Yr->a, h_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(XYr->b + h_bitSize, Yr->b, h_bitSize * sizeof(int));
-    memcpy(XYr->current_variance + h_bitSize, Yr->current_variance, h_bitSize * sizeof(double));
+    taskLevelParallelAdd_bitwise_vector_coalInput(P3, XYl, XYr,
+                                                  2, hBit, 1,
+                                                  bk, cudaBkFFTCoalesceExt,
+                                                  ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
 
-    taskLevelParallelAdd_bitwise_vector(P3, XYl, XYr, 2, h_bitSize, 1, bk, cudaBkFFT,
-                                        cudaBkFFTCoalesce,
-                                        ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                                        ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
+    /*cudaMemcpy(temp->a, Xl->a, h_bitSize * n * sizeof(Torus32), D2D);
+    memcpy(temp->b, Xl->b, h_bitSize * sizeof(int));
+    testCipher("Xl", temp, h_bitSize, bk, key);
+
+    cudaMemcpy(temp->a, Xr->a, h_bitSize * n * sizeof(Torus32), D2D);
+    memcpy(temp->b, Xr->b, h_bitSize * sizeof(int));
+    testCipher("Xr", temp, h_bitSize, bk, key);
+
+    cudaMemcpy(temp->a, Yl->a, h_bitSize * n * sizeof(Torus32), D2D);
+    memcpy(temp->b, Yl->b, h_bitSize * sizeof(int));
+    testCipher("Yl", temp, h_bitSize, bk, key);
+
+    cudaMemcpy(temp->a, Yr->a, h_bitSize * n * sizeof(Torus32), D2D);
+    memcpy(temp->b, Yr->b, h_bitSize * sizeof(int));
+    testCipher("Yr", temp, h_bitSize, bk, key);
+
+    cudaMemcpy(temp->a, P3->a, h_bitSize * n * sizeof(Torus32), D2D);
+    memcpy(temp->b, P3->b, h_bitSize * sizeof(int));
+    testCipher("P30", temp, h_bitSize, bk, key);
+
+    cudaMemcpy(temp->a, P3->a + h_bitSize * n, h_bitSize * n * sizeof(Torus32), D2D);
+    memcpy(temp->b, P3->b + h_bitSize, h_bitSize * sizeof(int));
+    testCipher("P31", temp, h_bitSize, bk, key);*/
+
     P3_1 = P3;
-    P3_2->a = P3->a + h_bitSize * n;
-    P3_2->b = P3->b + h_bitSize;
-    P3_2->current_variance = P3->current_variance + h_bitSize;
+    P3_2->a = P3->a + hBit * n;
+    P3_2->b = P3->b + hBit;
 
     input1[0] = Xl;
     input1[1] = Xr;
@@ -2224,273 +2333,241 @@ void karatMasterSuba(LweSample_16 *cudaRes, LweSample_16 *a, LweSample_16 *b, in
     input2[0] = Yl;
     input2[1] = Yr;
     input2[2] = P3_2;
+    conMulRes[0] = convertBitToNumberZero_GPU(fBit, bk);
+    conMulRes[1] = convertBitToNumberZero_GPU(fBit, bk);
+    conMulRes[2] = convertBitToNumberZero_GPU(fBit, bk);
 
-    concurrentMultiplication(conMulRes, input1, input2, nConMul, h_bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, ks_a_gpu,
-                             ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr,
-                             ks_cv_gpu_extendedPtr, key);
+    BOOTS_vectorMultiplication(conMulRes, input1, input2, nConMul,
+                               hBit, true,
+                               bk, cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
 
-    P1->a = conMulRes->a;
-    P1->b = conMulRes->b;
-    P1->current_variance = conMulRes->current_variance;
+    /*for (int i = 0; i < nConMul; ++i) {
+        cudaMemcpy(temp->a, input1[i]->a, h_bitSize * n * sizeof(Torus32), D2D);
+        memcpy(temp->b, input1[i]->b, h_bitSize * sizeof(int));
+        testCipher("input1", temp, h_bitSize, bk, key);
 
-    P2->a = conMulRes->a + f_bitSize * n;
-    P2->b = conMulRes->b + f_bitSize;
-    P2->current_variance = conMulRes->current_variance + f_bitSize;
+        cudaMemcpy(temp->a, input2[i]->a, h_bitSize * n * sizeof(Torus32), D2D);
+        memcpy(temp->b, input2[i]->b, h_bitSize * sizeof(int));
+        testCipher("input2", temp, h_bitSize, bk, key);
 
-    E_MUL->a = conMulRes->a + 2 * f_bitSize * n;
-    E_MUL->b = conMulRes->b + 2 * f_bitSize;
-    E_MUL->current_variance = conMulRes->current_variance + 2 * f_bitSize;
+        cudaMemcpy(temp2->a, conMulRes[i]->a, f_bitSize * n * sizeof(Torus32), D2D);
+        memcpy(temp2->b, conMulRes[i]->b, f_bitSize * sizeof(int));
+        testCipher("r1", temp2, f_bitSize, bk, key);
+        cout << endl;
+    }*/
 
-//    cudaMemcpy(temp2->a, P1->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp2->b, P1->b, f_bitSize * sizeof(int));
-//        memcpy(temp2->current_variance, P1->current_variance, f_bitSize * sizeof(double));
-//        testCipher("P1", temp2, f_bitSize, bk, key);
+    LweSample_16 *P1 = conMulRes[0];
+    LweSample_16 *P2 = conMulRes[1];
+    LweSample_16 *E_MUL = conMulRes[2];
 
-//        cudaMemcpy(temp2->a, P2->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp2->b, P2->b, f_bitSize * sizeof(int));
-//    memcpy(temp2->current_variance, P2->current_variance, f_bitSize * sizeof(double));
-//    testCipher("P2", temp2, f_bitSize, bk, key);
+    /*testCipher("P1", P1, f_bitSize, bk, key);
+    testCipher("P2", P2, f_bitSize, bk, key);
+    testCipher("EMUL", E_MUL, f_bitSize, bk, key);*/
 
-//    cudaMemcpy(temp2->a, E_MUL->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp2->b, E_MUL->b, f_bitSize * sizeof(int));
-//    memcpy(temp2->current_variance, E_MUL->current_variance, f_bitSize * sizeof(double));
-//    testCipher("EMUL", temp2, f_bitSize, bk, key);
+    cudaMemcpy(PE_1->a, P1->a, fBit * n * sizeof(int), D2D);
+    memcpy(PE_1->b, P1->b, fBit * sizeof(int));
 
+    /*int i =0;
+    cudaMemcpy(temp2->a, PE_1->a + i * f_bitSize * n, f_bitSize * n * sizeof(int), D2D);
+    memcpy(temp2->b, PE_1->b + i * f_bitSize, f_bitSize * sizeof(int));
+    testCipher("PE_1.0", temp2, f_bitSize, bk, key);*/
 
+    cudaMemcpy(PE_1->a + fBit * n, E_MUL->a, fBit * n * sizeof(int), D2D);
+    memcpy(PE_1->b + fBit, E_MUL->b, fBit * sizeof(int));
 
-    LweSample_16 *PE = convertBitToNumberZero_GPU(2 * f_bitSize, bk);
-    LweSample_16 *PE_1 = convertBitToNumberZero_GPU(2 * f_bitSize, bk);
-    LweSample_16 *PE_2 = convertBitToNumberZero_GPU(2 * f_bitSize, bk);
+    /*i =1;
+    cudaMemcpy(temp2->a, PE_1->a + i * f_bitSize * n, f_bitSize * n * sizeof(int), D2D);
+    memcpy(temp2->b, PE_1->b + i * f_bitSize, f_bitSize * sizeof(int));
+    testCipher("PE_1.1", temp2, f_bitSize, bk, key);*/
 
-    cudaMemcpy(PE_1->a, P1->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(PE_1->b, P1->b, f_bitSize * sizeof(int));
-    memcpy(PE_1->current_variance, P1->current_variance, f_bitSize * sizeof(double));
+    cudaMemcpy(PE_2->a, P2->a, fBit * n * sizeof(int), D2D);
+    memcpy(PE_2->b, P2->b, fBit * sizeof(int));
 
-//    int i =0;
-//    cudaMemcpy(temp2->a, PE_1->a + i * f_bitSize * n, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp2->b, PE_1->b + i * f_bitSize, f_bitSize * sizeof(int));
-//    memcpy(temp2->current_variance, PE_1->current_variance + i * f_bitSize, f_bitSize * sizeof(double));
-//    testCipher("PE_1.0", temp2, f_bitSize, bk, key);
+    /*i =0;
+    cudaMemcpy(temp2->a, PE_2->a + i * f_bitSize * n, f_bitSize * n * sizeof(int), D2D);
+    memcpy(temp2->b, PE_2->b + i * f_bitSize, f_bitSize * sizeof(int));
+    testCipher("PE_2.0", temp2, f_bitSize, bk, key);*/
 
+    cudaMemcpy(PE_2->a + fBit * n, E_ONE->a, fBit * n * sizeof(int), D2D);
+    memcpy(PE_2->b + fBit, E_ONE->b, fBit * sizeof(int));
 
+    /*i =1;
+    cudaMemcpy(temp2->a, PE_2->a + i * f_bitSize * n, f_bitSize * n * sizeof(int), D2D);
+    memcpy(temp2->b, PE_2->b + i * f_bitSize, f_bitSize * sizeof(int));
+    testCipher("PE_2.1", temp2, f_bitSize, bk, key);*/
 
-    cudaMemcpy(PE_1->a + f_bitSize * n, E_MUL->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(PE_1->b + f_bitSize, E_MUL->b, f_bitSize * sizeof(int));
-    memcpy(PE_1->current_variance + f_bitSize, E_MUL->current_variance, f_bitSize * sizeof(double));
+    taskLevelParallelAdd_bitwise_vector_coalInput(PE, PE_1, PE_2,
+                                                  2, fBit, 1,
+                                                  bk, cudaBkFFTCoalesceExt,
+                                                  ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    /*for (int i = 0; i < 2; ++i) {
+        cudaMemcpy(temp2->a, PE->a + i * f_bitSize * n, f_bitSize * n * sizeof(int), D2D);
+        memcpy(temp2->b, PE->b + i * f_bitSize, f_bitSize * sizeof(int));
+        testCipher("sum.1", temp2, f_bitSize, bk, key);
+    }*/
 
-//    i =1;
-//    cudaMemcpy(temp2->a, PE_1->a + i * f_bitSize * n, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp2->b, PE_1->b + i * f_bitSize, f_bitSize * sizeof(int));
-//    memcpy(temp2->current_variance, PE_1->current_variance + i * f_bitSize, f_bitSize * sizeof(double));
-//    testCipher("PE_1.1", temp2, f_bitSize, bk, key);
+    E_ADD = PE;
+    E_MUL->a = PE->a + fBit * n;
+    E_MUL->b = PE->b + fBit;
 
-    cudaMemcpy(PE_2->a, P2->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(PE_2->b, P2->b, f_bitSize * sizeof(int));
-    memcpy(PE_2->current_variance, P2->current_variance, f_bitSize * sizeof(double));
+    bootsNOT_16(E_1sComplement, E_ADD, fBit, n);
 
-//    i =0;
-//    cudaMemcpy(temp2->a, PE_2->a + i * f_bitSize * n, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp2->b, PE_2->b + i * f_bitSize, f_bitSize * sizeof(int));
-//    memcpy(temp2->current_variance, PE_2->current_variance + i * f_bitSize, f_bitSize * sizeof(double));
-//    testCipher("PE_2.0", temp2, f_bitSize, bk, key);
+    /*cudaMemcpy(temp2->a, E_ADD->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
+    memcpy(temp2->b, E_ADD->b, f_bitSize * sizeof(int));
+    testCipher("AC + BD", temp2, f_bitSize, bk, key);
+    cudaMemcpy(temp2->a, E_MUL->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
+    memcpy(temp2->b, E_MUL->b, f_bitSize * sizeof(int));
+    testCipher("E_MUL + 1", temp2, f_bitSize, bk, key);
+    testCipher("(AC + BD)", E_1sComplement, f_bitSize, bk, key);*/
 
-    cudaMemcpy(PE_2->a + f_bitSize * n, E_ONE->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(PE_2->b + f_bitSize, E_ONE->b, f_bitSize * sizeof(int));
-    memcpy(PE_2->current_variance + f_bitSize, E_ONE->current_variance, f_bitSize * sizeof(double));
+    taskLevelParallelAdd_bitwise(E, E_MUL, E_1sComplement,
+                                 nBit, bk, cudaBkFFTCoalesceExt,
+                                 ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
 
-//    i =1;
-//    cudaMemcpy(temp2->a, PE_2->a + i * f_bitSize * n, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp2->b, PE_2->b + i * f_bitSize, f_bitSize * sizeof(int));
-//    memcpy(temp2->current_variance, PE_2->current_variance + i * f_bitSize, f_bitSize * sizeof(double));
-//    testCipher("PE_2.1", temp2, f_bitSize, bk, key);
-//    cout << "------------------1" << endl;
-
-    taskLevelParallelAdd_bitwise_vector(PE, PE_1, PE_2, 2, f_bitSize, 1, bk, cudaBkFFT,
-                                        cudaBkFFTCoalesce,
-                                        ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                                        ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-    E_ADD->a = PE->a;
-    E_ADD->b = PE->b;
-    E_ADD->current_variance = PE->current_variance;
-    E_MUL->a = PE->a + f_bitSize * n;
-    E_MUL->b = PE->b + f_bitSize;
-    E_MUL->current_variance = PE->current_variance + f_bitSize;
-//    cout << "------------------2" << endl;
-
-
-//    cudaMemcpy(temp2->a, E_ADD->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp2->b, E_ADD->b, f_bitSize * sizeof(int));
-//    memcpy(temp2->current_variance, E_ADD->current_variance, f_bitSize * sizeof(double));
-//    testCipher("AC + BD", temp2, f_bitSize, bk, key);
-//
-//    cudaMemcpy(temp2->a, E_MUL->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//    memcpy(temp2->b, E_MUL->b, f_bitSize * sizeof(int));
-//    memcpy(temp2->current_variance, E_MUL->current_variance, f_bitSize * sizeof(double));
-//    testCipher("E_MUL + 1", temp2, f_bitSize, bk, key);
+    cudaMemcpy(result->a + fBit * n, P2->a, fBit * n * sizeof(int), cudaMemcpyDeviceToDevice);
+    memcpy(result->b + fBit, P2->b, fBit * sizeof(int));
 
 
-    bootsNOT_16(E_1sComplement, E_ADD, f_bitSize, n);
-//    testCipher("(AC + BD)", E_1sComplement, f_bitSize, bk, key);
-//
-//    cout << "------------------3" << endl;
-//    cout << "here" << endl;
+    cudaMemcpy(result->a + hBit * n, E->a, hBit * n * sizeof(int), cudaMemcpyDeviceToDevice);
+    memcpy(result->b + hBit, E->b, hBit * sizeof(int));
 
-    taskLevelParallelAdd_bitwise(E, E_MUL, E_1sComplement, 1, f_bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce,
-                                 NULL, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                                 ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-//    taskLevelParallelAdd_bitwise_vector(E, E_MUL, E_1sComplement, 1, f_bitSize, 1, bk, cudaBkFFT,
-//                                        cudaBkFFTCoalesce,
-//                                        ks_a_gpu, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-//                                        ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
+    cudaMemcpy(result->a, P1->a, hBit * n * sizeof(int), cudaMemcpyDeviceToDevice);
+    memcpy(result->b, P1->b, hBit * sizeof(int));
 
-//    cout << "------------------4" << endl;
-//    testCipher("E", E, f_bitSize, bk, key);
-
-//    cudaMemset(E_padded->a, 0, nOutputBits * n * sizeof(int));
-
-    cudaMemcpy(E_padded->a + f_bitSize * n, P2->a, f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(E_padded->b + f_bitSize, P2->b, f_bitSize * sizeof(int));
-    memcpy(E_padded->current_variance + f_bitSize, P2->current_variance, f_bitSize * sizeof(double));
-//    testCipher("E_padded (E_padded)", E_padded, f_bitSize, bk, key);
-
-    cudaMemcpy(E_padded->a + h_bitSize * n, E->a, h_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(E_padded->b + h_bitSize, E->b, h_bitSize * sizeof(int));
-    memcpy(E_padded->current_variance + h_bitSize, E->current_variance, h_bitSize * sizeof(double));
-//    testCipher("E_padded (E_padded)", E_padded, f_bitSize, bk, key);
-
-    cudaMemcpy(E_padded->a, P1->a, h_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(E_padded->b, P1->b, h_bitSize * sizeof(int));
-    memcpy(E_padded->current_variance, P1->current_variance, h_bitSize * sizeof(double));
-    testCipher("Final result (E_padded)", E_padded, nOutputBits, bk, key);
-
-    cudaMemcpy(cudaRes->a, E_padded->a, 2 * f_bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-    memcpy(cudaRes->b, E_padded->b, 2 * f_bitSize * sizeof(int));
-    memcpy(cudaRes->current_variance, E_padded->current_variance, 2 * f_bitSize * sizeof(double));
-    testCipher("Final result (cudaRes)", cudaRes, nOutputBits, bk, key);
-
-
+    //free memory
+    delete Xr;
+    delete Yr;
+    freeLweSample_16_gpu(XYl);
+    freeLweSample_16_gpu(XYr);
+    freeLweSample_16_gpu(P3);
+    delete P3_2;
+    freeLweSample_16_gpu(PE);
+    freeLweSample_16_gpu(PE_1);
+    freeLweSample_16_gpu(PE_2);
+    freeLweSample_16_gpu(E_1sComplement);
+    freeLweSample_16_gpu(E_ONE);
+    freeLweSample_16_gpu(E);
+    freeLweSample_16_gpu(temp);
+    freeLweSample_16_gpu(temp2);
+    freeLweSample_16_gpu(P1);
+    freeLweSample_16_gpu(P2);
+    delete[] input1;
+    delete[] input2;
+    delete[] conMulRes;
 }
 
-void karatSuba_test(LweSample *ca, LweSample *cb, int bitSize,
-                             const TFheGateBootstrappingCloudKeySet *bk,
-                             TFheGateBootstrappingSecretKeySet *key) {
-//    assert(bitSize == BIT_32);
-
-    int nOutputBits = bitSize * 2;
-
-    cufftDoubleComplex ****cudaBkFFT = NULL;//sendBootstrappingKeyToGPU(1, bk);
-    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(1, bk);
-    Torus32 ****ks_a_gpu_extended = NULL;//sendKeySwitchKeyToGPU_extended(inputBitSize, bk);
-
-    cufftDoubleComplex ****cudaBkFFT_x2 = NULL;//sendBootstrappingKeyToGPU(outputBitSize, bk);
-    cufftDoubleComplex ***cudaBkFFTCoalesce_x2 = NULL;// sendBootstrappingKeyToGPUCoalesce(outputBitSize, bk);
-    Torus32 ****ks_a_gpu_extended_x2 = NULL;//sendKeySwitchKeyToGPU_extended(outputBitSize, bk);
-
-    int ***ks_b_gpu = NULL;//sendKeySwitchBtoGPU(bk);
-    double ***ks_cv_gpu = NULL;//sendKeySwitchCVtoGPU(bk);
-    const LweParams *in_out_params = bk->params->in_out_params;
-
-    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, bk);
-    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(bk);
-    double *ks_cv_gpu_extendedPtr = sendKeySwitchCVtoGPUOnePtr(bk);
-
-//    assert(bitSize == BIT_32);
-    LweSample_16 *a = convertBitToNumber(ca, bitSize, bk);
-    LweSample_16 *b = convertBitToNumber(cb, bitSize, bk);
-    LweSample_16 *result = convertBitToNumberZero_GPU(nOutputBits, bk);//2*inputBitSize
-
-    //send a, b, result to cuda
-    int *temp;
-    temp = a->a;
-    cudaMalloc(&(a->a), bitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(a->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-    free(temp);
-
-    temp = b->a;
-    cudaMalloc(&(b->a), bitSize * in_out_params->n * sizeof(int));
-    cudaMemcpy(b->a, temp, bitSize * in_out_params->n * sizeof(int), cudaMemcpyHostToDevice);
-    free(temp);
-
-    cout << "KARAT " << bitSize << endl;
-    int startTime = omp_get_wtime();
-    karatMasterSuba(result, a, b, bitSize, bk, cudaBkFFT, cudaBkFFT_x2, cudaBkFFTCoalesce, cudaBkFFTCoalesce_x2,
-                    NULL, ks_a_gpu_extended, ks_a_gpu_extended_x2, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                    ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);//ks_a_gpu
-    cout << "Time Taken To Multiply: " << omp_get_wtime() - startTime << endl;
-//    testCipher("A", a, bitSize, bk, key);
-//    testCipher("B", b, bitSize, bk, key);
-    testCipher("multiplication Result", result, nOutputBits, bk, key);
-
-//    cout << "I am here" << endl;
-}
-
-
-
-void vectorMultiplicationTest(LweSample *ca, LweSample *cb, int bitSize, int nConMul,
+void karatSuba_test(LweSample *ca, LweSample *cb, int nBit,
                     const TFheGateBootstrappingCloudKeySet *bk,
+                    cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                    Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
                     TFheGateBootstrappingSecretKeySet *key) {
+    const int n = 500, nOut = nBit * 2;
 
-    const int n = bk->params->in_out_params->n;
-    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(1, bk);
-    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, bk);
-    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(bk);
-    double *ks_cv_gpu_extendedPtr = sendKeySwitchCVtoGPUOnePtr(bk);
-    int nOutputBitSize = bitSize * 2;
-
-    LweSample_16 *a = convertBitToNumber(ca, bitSize, bk);
-    LweSample_16 *b = convertBitToNumber(cb, bitSize, bk);
-    LweSample_16 *result = convertBitToNumberZero_GPU(nOutputBitSize * nConMul, bk);
+    LweSample_16 *a = convertBitToNumber(ca, nBit, bk);
+    LweSample_16 *b = convertBitToNumber(cb, nBit, bk);
+    LweSample_16 *result = convertBitToNumberZero_GPU(nOut, bk);
 
     //send a, b, result to cuda
     int *temp;
     temp = a->a;
-    cudaMalloc(&(a->a), bitSize * n * sizeof(int));
-    cudaMemcpy(a->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&(a->a), nBit * n * sizeof(int));
+    cudaMemcpy(a->a, temp, nBit * n * sizeof(int), H2D);
     free(temp);
 
     temp = b->a;
-    cudaMalloc(&(b->a), bitSize * n * sizeof(int));
-    cudaMemcpy(b->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc(&(b->a), nBit * n * sizeof(int));
+    cudaMemcpy(b->a, temp, nBit * n * sizeof(int), H2D);
+    free(temp);
+
+    cout << "KARAT " << nBit << endl;
+    int startTime = omp_get_wtime();
+    karatMasterSuba(result, a, b,
+                    nBit, bk,
+                    cudaBkFFTCoalesceExt,
+                    ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    cout << "Time Taken To Multiply: " << omp_get_wtime() - startTime << endl;
+    testCipher("A", a, nBit, bk, key);
+    testCipher("B", b, nBit, bk, key);
+    testCipher("A * B", result, nOut, bk, key);
+
+    freeLweSample_16_gpu(a);
+    freeLweSample_16_gpu(b);
+    freeLweSample_16_gpu(result);
+}
+
+
+void vectorMultiplicationTest(LweSample *ca, LweSample *cb, int nBits,
+                              const TFheGateBootstrappingCloudKeySet *bk,
+                              cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                              Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                              TFheGateBootstrappingSecretKeySet *key) {
+
+    bool isDoublePrecision = true;
+    const int iBits = nBits, oBits = isDoublePrecision ? nBits * 2 : nBits, n = 500;
+
+    LweSample_16 *a = convertBitToNumber(ca, iBits, bk);
+    LweSample_16 *b = convertBitToNumber(cb, iBits, bk);
+
+    //send a, b, result to cuda
+    int *temp;
+    temp = a->a;
+    cudaMalloc(&(a->a), iBits * n * sizeof(Torus32));
+    cudaMemcpy(a->a, temp, iBits * n * sizeof(Torus32), H2D);
+    free(temp);
+
+    temp = b->a;
+    cudaMalloc(&(b->a), iBits * n * sizeof(Torus32));
+    cudaMemcpy(b->a, temp, iBits * n * sizeof(Torus32), H2D);
     free(temp);
 
     //prepare vector
     cout << "Preparing vector" << endl;
-    LweSample_16 **arrayA = new LweSample_16*[nConMul];
-    LweSample_16 **arrayB = new LweSample_16*[nConMul];
-    for (int i = 0; i < nConMul; ++i) {
-        arrayA[i] = convertBitToNumberZero_GPU(bitSize, bk);
-        arrayB[i] = convertBitToNumberZero_GPU(bitSize, bk);
+    const int vLength = 10;
+    LweSample_16 **inputA = new LweSample_16 *[vLength];
+    LweSample_16 **inputB = new LweSample_16 *[vLength];
+    LweSample_16 **result = new LweSample_16 *[vLength];
+    for (int i = 0; i < vLength; ++i) {
+        inputA[i] = convertBitToNumberZero_GPU(iBits, bk);
+        leftShiftCuda_16(inputA[i], a, iBits, i % 10, bk);
+//        cudaMemcpy(inputA[i]->a, a->a, iBits * n * sizeof(Torus32), D2D);
+//        memcpy(inputA[i]->b, a->b, iBits * sizeof(int));
+        testCipher("inputA", inputA[i], iBits, bk, key);
 
-        cudaMemcpy(arrayA[i]->a, a->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(arrayA[i]->b, a->b, bitSize * sizeof(int));
+        inputB[i] = convertBitToNumberZero_GPU(iBits, bk);
+//        leftShiftCuda_16(inputB[i], b, iBits, i % 10, bk);
+        cudaMemcpy(inputB[i]->a, b->a, iBits * n * sizeof(Torus32), D2D);
+        memcpy(inputB[i]->b, b->b, iBits * sizeof(int));
+        testCipher("inputB", inputB[i], iBits, bk, key);
 
-        cudaMemcpy(arrayB[i]->a, b->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(arrayB[i]->b, b->b, bitSize * sizeof(int));
+        result[i] = convertBitToNumberZero_GPU(oBits, bk);
+        cout << endl;
     }
 
-    cout << "Vector Multiplication" << bitSize << endl;
+    cout << "Starting Vector Multiplication" << endl;
     double sT = omp_get_wtime();
-    concurrentMultiplication(result, arrayA, arrayB, nConMul, bitSize, bk, NULL, cudaBkFFTCoalesce, NULL,
-                             NULL, NULL, NULL, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr,
-                             ks_cv_gpu_extendedPtr, key);
-    cout << "#Concurrent Multiplication: " << nConMul << " Time taken: " << omp_get_wtime() - sT << endl;
-    LweSample_16 *tempRes = convertBitToNumberZero_GPU(nOutputBitSize, bk);
-    for (int i = 0; i < nConMul; ++i) {
-        cudaMemcpy(tempRes->a, result->a + i * nOutputBitSize * n, nOutputBitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(tempRes->b, result->b + i * nOutputBitSize, nOutputBitSize * sizeof(int));
-        memcpy(tempRes->current_variance, result->current_variance + i * nOutputBitSize, nOutputBitSize * sizeof(double));
-        testCipher("result", tempRes, nOutputBitSize, bk, key);
-    }/**/
-////    testCipher("A", a, bitSize, bk, key);
-////    testCipher("B", b, bitSize, bk, key);
-//    testCipher("multiplication Result", result, bitSize, bk, key);
-//
-//    cout << "I am here" << endl;
+    BOOTS_vectorMultiplication(result, inputA, inputB, vLength,
+                               iBits, isDoublePrecision,
+                               bk, cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    cout << "Vector Length: " << vLength << " Time taken: " << omp_get_wtime() - sT << endl;
+    //show output
+    for (int i = 0; i < vLength; ++i) {
+        testCipher("result", result[i], oBits, bk, key);
+    }
+
+    //free memory
+    for (int i = 0; i < vLength; ++i) {
+        freeLweSample_16_gpu(inputA[i]);
+        freeLweSample_16_gpu(inputB[i]);
+        freeLweSample_16_gpu(result[i]);
+    }
+    freeLweSample_16_gpu(a);
+    freeLweSample_16_gpu(b);
+    delete[] inputA;
+    delete[] inputB;
+    delete[] result;
 }
-
-
-
-
 
 int decryptCheck(Cipher cipher, TFheGateBootstrappingSecretKeySet *key) {
     int int_answer = 0;
@@ -2512,175 +2589,312 @@ int decryptCheck(Cipher cipher, TFheGateBootstrappingSecretKeySet *key) {
     return int_answer;
 }
 
-
-void testMatrixOperation(LweSample *ca, LweSample *cb, int bitSize,
-                                const TFheGateBootstrappingCloudKeySet *bk,
-                                TFheGateBootstrappingSecretKeySet *key) {
-    const int n = bk->bk->in_out_params->n;
-    cufftDoubleComplex ****cudaBkFFT = NULL;
-    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(1, bk);
-    Torus32 ****ks_a_gpu_extended = NULL;
-
-    int ***ks_b_gpu = NULL;
-    double ***ks_cv_gpu = NULL;
-    const LweParams *in_out_params = bk->params->in_out_params;
-    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, bk);
-
-    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(bk);
-    double *ks_cv_gpu_extendedPtr = sendKeySwitchCVtoGPUOnePtr(bk);
-
-    int row = 2, col = 2;
-    //construct m1 m2
-    LweSample_16 ***m1 = new LweSample_16**[row];
-    LweSample_16 ***m2 = new LweSample_16**[row];
-    for (int i = 0; i < row ; ++i) {
-        m1[i] = new LweSample_16*[col];
-        m2[i] = new LweSample_16*[col];
-        for (int j = 0; j < col; ++j) {
-            m1[i][j] = convertBitToNumber(ca, bitSize, bk);
-            m2[i][j] = convertBitToNumber(cb, bitSize, bk);
-
-            int *temp;
-            temp = m1[i][j]->a;
-            cudaMalloc(&(m1[i][j]->a), bitSize * n * sizeof(int));
-            cudaMemcpy(m1[i][j]->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
-            free(temp);
-
-            temp = m2[i][j]->a;
-            cudaMalloc(&(m2[i][j]->a), bitSize * n * sizeof(int));
-            cudaMemcpy(m2[i][j]->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
-            free(temp);
-
-//            int x = i * col + j;
-//            if (x > 0 && x < bitSize) {
-//                leftShiftCuda_16_vector(m1[i][j], m1[0][0], 1, bitSize, x, bk);
-//                leftShiftCuda_16_vector(m2[i][j], m2[0][0], 1, bitSize, x, bk);
-//            }
-
-            cout << "i: " << i << " j: " << j << endl;
-            testCipher("m1", m1[i][j], bitSize, bk, key);
-            testCipher("m2", m2[i][j], bitSize, bk, key);
-        }
-    }
-
-    //send data to GPU
-//    LweSample_16 ***d_m1 = matrixToDevice(m1, row, col, bitSize, bk);
-//    LweSample_16 ***d_m2 = matrixToDevice(m2, row, col, bitSize, bk);
-    //construct vector from matrix
-    LweSample_16 *v1 = matrixToVector(m1, row, col, bitSize, bk);
-    LweSample_16 *v2 = matrixToVector(m2, row, col, bitSize, bk);
-
-    LweSample_16 *result = convertBitToNumberZero_GPU(row * col * bitSize, bk);
-    //addition function
-    taskLevelParallelAdd_bitwise_vector(result, v1, v2, row * col, bitSize, 1, bk, cudaBkFFT, cudaBkFFTCoalesce,
-                                        NULL, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                                        ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-
-    //get result
-    LweSample_16 ***addResult = vectorToMatrix(result, row, col, bitSize, bk);
+void BOOTS_matrixAddition(LweSample_16 ***result, LweSample_16 ***mA, LweSample_16 ***mB,
+                          int row, int col, int nBits,
+                          const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                          Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                          TFheGateBootstrappingSecretKeySet *key) {
+    const int n = 500;
+    LweSample_16 *v1 = convertBitToNumberZero_GPU(row * col * nBits, bk);
+    LweSample_16 *v2 = convertBitToNumberZero_GPU(row * col * nBits, bk);
+    LweSample_16 *iResult = convertBitToNumberZero_GPU(row * col * nBits, bk);
+//    LweSample_16 *temp = convertBitToNumberZero_GPU(nBits, bk);
 
     for (int i = 0; i < row; ++i) {
         for (int j = 0; j < col; ++j) {
-            testCipher("res", addResult[i][j], bitSize, bk, key);
+            cudaMemcpy(v1->a  + (i * col + j) * nBits * n, mA[i][j]->a, nBits * n * sizeof(Torus32), D2D);
+            memcpy(v1->b + (i * col + j) * nBits, mA[i][j]->b, nBits * sizeof(int));
+            cudaMemcpy(v2->a  + (i * col + j) * nBits * n, mB[i][j]->a, nBits * n * sizeof(Torus32), D2D);
+            memcpy(v2->b + (i * col + j) * nBits, mB[i][j]->b, nBits * sizeof(int));
         }
     }
-    //matrix addition complete
+    //addition function
+    taskLevelParallelAdd_bitwise_vector_coalInput(iResult, v1, v2,
+                                                  row * col, nBits, 1, bk, cudaBkFFTCoalesceExt,
+                                                  ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    /*for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            int index = i * col + j;
+            int sI = index * nBits;
+            cudaMemcpy(temp->a, v1->a + sI * n, nBits * n * sizeof(int), D2D);
+            memcpy(temp->b, v1->b + sI, nBits * sizeof(int));
+            testCipher("v1", temp, nBits, bk, key);
 
-    // matrix multiplication start
-    //prepare left matrix
-    LweSample_16 **leftMatVec = matMul_prepareLeftMat(m1, row, col, col, bitSize, bk);
-    //test
-    int leftMatLen = row * col * col;
-    for (int i = 0; i < leftMatLen; ++i) {
-        testCipher("left mat", leftMatVec[i], bitSize, bk, key);
-    }
-    //prepare right matrix
-    LweSample_16 **rightMatVec = matMul_prepareRightMat(m2, row, col, row, bitSize, bk);
+            cudaMemcpy(temp->a, v2->a + sI * n, nBits * n * sizeof(int), D2D);
+            memcpy(temp->b, v2->b + sI, nBits * sizeof(int));
+            testCipher("v2", temp, nBits, bk, key);
 
-    //test
-    int rightMatLen = row * col * row;
-    for (int i = 0; i < rightMatLen; ++i) {
-        testCipher("right mat", rightMatVec[i], bitSize, bk, key);
-    }
-    int nConMul = row * col * row;
-    int nOutputBits = bitSize * 2;
-    LweSample_16 *matMulRes = convertBitToNumberZero_GPU(nConMul * nOutputBits, bk);;
+            cudaMemcpy(temp->a, iResult->a + sI * n, nBits * n * sizeof(int), D2D);
+            memcpy(temp->b, iResult->b + sI, nBits * sizeof(int));
+            testCipher("r", temp, nBits, bk, key);
+            cout << endl;
+        }
+    }*/
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            cudaMemcpy(result[i][j]->a, iResult->a + (i * col + j) * nBits * n, nBits * n * sizeof(Torus32), D2D);
+            memcpy(result[i][j]->b, iResult->b + (i * col + j) * nBits, nBits * sizeof(int));
 
-    concurrentMultiplication(matMulRes, leftMatVec, rightMatVec, nConMul, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce,
-                             NULL, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                             ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-    //prepare vector for multiplication
-    LweSample_16 *temp = convertBitToNumberZero_GPU(nOutputBits, bk);
-    LweSample_16 *addV1 = convertBitToNumberZero_GPU(rightMatLen/2 * nOutputBits, bk);
-    LweSample_16 *addV2 = convertBitToNumberZero_GPU(rightMatLen/2 * nOutputBits, bk);
-    for (int i = 0; i < rightMatLen; ++i) {
-        int j = i / 2;
-        if(i % 2 == 0) {
-            cudaMemcpy(addV1->a + j * nOutputBits * n, matMulRes->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-            memcpy(addV1->b + j * nOutputBits, matMulRes->b + i * nOutputBits, nOutputBits * sizeof(int));
-            memcpy(addV1->current_variance + j * nOutputBits, matMulRes->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
-
-            cudaMemcpy(temp->a, addV1->a + j * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-            memcpy(temp->b, addV1->b + j * nOutputBits, nOutputBits * sizeof(int));
-            memcpy(temp->current_variance, addV1->current_variance + j * nOutputBits, nOutputBits * sizeof(double));
-            testCipher("0 ", temp, nOutputBits, bk, key);
-        } else {
-            cudaMemcpy(addV2->a + j * nOutputBits * n, matMulRes->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-            memcpy(addV2->b + j * nOutputBits, matMulRes->b + i * nOutputBits, nOutputBits * sizeof(int));
-            memcpy(addV2->current_variance + j * nOutputBits, matMulRes->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
-
-            cudaMemcpy(temp->a, addV2->a + j * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-            memcpy(temp->b, addV2->b + j * nOutputBits, nOutputBits * sizeof(int));
-            memcpy(temp->current_variance, addV2->current_variance + j * nOutputBits, nOutputBits * sizeof(double));
-            testCipher("1 ", temp, nOutputBits, bk, key);
         }
     }
+    freeLweSample_16_gpu(v1);
+    freeLweSample_16_gpu(v2);
+    freeLweSample_16_gpu(iResult);
+}
 
-    taskLevelParallelAdd_bitwise_vector(matMulRes, addV1, addV2, 1, nOutputBits, rightMatLen/2, bk, cudaBkFFT,
-                                        cudaBkFFTCoalesce,
-                                        NULL, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                                        ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
+void testMatrixAddition(LweSample *ca, LweSample *cb, int nBits,
+                         const TFheGateBootstrappingCloudKeySet *bk,
+                         cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                         Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                         TFheGateBootstrappingSecretKeySet *key) {
+    const int n = 500;
+    const int row = 2, col = 2;
+    //construct matrices
+    LweSample_16 ***m1 = new LweSample_16**[row];
+    LweSample_16 ***m2 = new LweSample_16**[row];
+    LweSample_16 ***addResult = new LweSample_16**[row];
+    for (int i = 0; i < row ; ++i) {
+        m1[i] = new LweSample_16*[col];
+        m2[i] = new LweSample_16*[col];
+        addResult[i] = new LweSample_16*[col];
+        for (int j = 0; j < col; ++j) {
+            m1[i][j] = convertBitToNumber(ca, nBits, bk);
+            m2[i][j] = convertBitToNumber(cb, nBits, bk);
+            addResult[i][j] = convertBitToNumberZero_GPU(nBits, bk);
 
-    for (rightMatLen /= 2; rightMatLen > row * col; rightMatLen /= 2) {
-        cout << "need to do more: rightMatLen: " << rightMatLen << endl;
-        for (int i = 0; i < rightMatLen; ++i) {
+            int *temp;
+            temp = m1[i][j]->a;
+            cudaMalloc(&(m1[i][j]->a), nBits * n * sizeof(int));
+            cudaMemcpy(m1[i][j]->a, temp, nBits * n * sizeof(int), H2D);
+            free(temp);
+
+            temp = m2[i][j]->a;
+            cudaMalloc(&(m2[i][j]->a), nBits * n * sizeof(int));
+            cudaMemcpy(m2[i][j]->a, temp, nBits * n * sizeof(int), H2D);
+            free(temp);
+
+            int x = i * col + j;
+            if (x > 0 && x < nBits) {
+                leftShiftCuda_16_vector(m1[i][j], m1[0][0], 1, nBits, x, bk);
+                leftShiftCuda_16_vector(m2[i][j], m2[0][0], 1, nBits, x, bk);
+            }
+
+            cout << "i: " << i << " j: " << j << endl;
+            testCipher("m1", m1[i][j], nBits, bk, key);
+            testCipher("m2", m2[i][j], nBits, bk, key);
+        }
+    }
+    cout << "Matrix Addition" << endl;
+    double sT = omp_get_wtime();
+    BOOTS_matrixAddition(addResult, m1, m2,
+                         row, col, nBits,
+                         bk, cudaBkFFTCoalesceExt,
+                         ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    cout << "row: " << row << " col: " << col << " Time taken: " << omp_get_wtime() - sT << endl;
+
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            testCipher("res", addResult[i][j], nBits, bk, key);
+        }
+    }
+    //free memory
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            freeLweSample_16_gpu(m1[i][j]);
+            freeLweSample_16_gpu(m2[i][j]);
+            freeLweSample_16_gpu(addResult[i][j]);
+        }
+    }
+}
+
+
+void BOOTS_matrixMultiplication(LweSample_16 ***result, LweSample_16 ***mA, LweSample_16 ***mB,
+                          int row, int col, int nBits, bool isDoublePrecision,
+                          const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                          Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                          TFheGateBootstrappingSecretKeySet *key) {
+    assert(row == col);
+    const int n = 500, iBits = nBits, oBits = isDoublePrecision ? nBits * 2 : nBits;
+    LweSample_16 **leftMat = matMul_prepareLeftMat(mA, row, col, col, iBits, bk);
+    LweSample_16 **rightMat = matMul_prepareRightMat(mB, row, col, row, iBits, bk);
+    LweSample_16 **iResult = new LweSample_16*[row * col * row];
+
+    for (int i = 0; i < row * col * row; ++i) {
+        iResult[i] = convertBitToNumberZero_GPU(oBits, bk);
+    }
+    int vLength = row * col * row;
+    BOOTS_vectorMultiplication(iResult, leftMat, rightMat,
+                               vLength, iBits, isDoublePrecision,
+                               bk, cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+
+    /*for (int i = 0; i < row * col * row; ++i) {
+        testCipher("left", leftMat[i], iBits, bk, key);
+        testCipher("right", rightMat[i], iBits, bk, key);
+        testCipher("res", iResult[i], iBits, bk, key);
+        cout << endl;
+    }*/
+    LweSample_16 *addV1 = convertBitToNumberZero_GPU(vLength/2 * oBits, bk);
+    LweSample_16 *addV2 = convertBitToNumberZero_GPU(vLength/2 * oBits, bk);
+    LweSample_16 *iResCoal = convertBitToNumberZero_GPU(vLength/2 * oBits, bk);
+//    LweSample_16 *temp = convertBitToNumberZero_GPU(oBits, bk);
+    /*for (; vLength > row * col; vLength /= 2) {
+        for (int i = 0; i < vLength; ++i) {
             int j = i / 2;
             if(i % 2 == 0) {
-                cudaMemcpy(addV1->a + j * nOutputBits * n, matMulRes->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-                memcpy(addV1->b + j * nOutputBits, matMulRes->b + i * nOutputBits, nOutputBits * sizeof(int));
-                memcpy(addV1->current_variance + j * nOutputBits, matMulRes->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
-
-                cudaMemcpy(temp->a, addV1->a + j * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-                memcpy(temp->b, addV1->b + j * nOutputBits, nOutputBits * sizeof(int));
-                memcpy(temp->current_variance, addV1->current_variance + j * nOutputBits, nOutputBits * sizeof(double));
-                testCipher("0 ", temp, nOutputBits, bk, key);
+                leftMat[j] = iResult[i];
+                testCipher("left", leftMat[j], iBits, bk, key);
             } else {
-                cudaMemcpy(addV2->a + j * nOutputBits * n, matMulRes->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-                memcpy(addV2->b + j * nOutputBits, matMulRes->b + i * nOutputBits, nOutputBits * sizeof(int));
-                memcpy(addV2->current_variance + j * nOutputBits, matMulRes->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
-
-                cudaMemcpy(temp->a, addV2->a + j * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-                memcpy(temp->b, addV2->b + j * nOutputBits, nOutputBits * sizeof(int));
-                memcpy(temp->current_variance, addV2->current_variance + j * nOutputBits, nOutputBits * sizeof(double));
-                testCipher("1 ", temp, nOutputBits, bk, key);
+                leftMat[j] = iResult[i];
+                testCipher("right", rightMat[j], iBits, bk, key);
             }
         }
 
-        taskLevelParallelAdd_bitwise_vector(matMulRes, addV1, addV2, 1, nOutputBits, rightMatLen/2, bk, cudaBkFFT,
-                                            cudaBkFFTCoalesce,
-                                            NULL, ks_a_gpu_extended, ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr,
-                                            ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
-        cout << endl;
+//        BOOTS_vectorMultiplication(iResult, leftMat, rightMat,
+//                                   vLength, iBits, isDoublePrecision,
+//                                   bk, cudaBkFFTCoalesceExt,
+//                                   ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    }*/
+
+    for (int i = 0; i < vLength; ++i) {
+        int j = i / 2;
+        if(i % 2 == 0) {
+            cudaMemcpy(addV1->a + j * oBits * n, iResult[i]->a, oBits * n * sizeof(int), D2D);
+            memcpy(addV1->b + j * oBits, iResult[i]->b, oBits * sizeof(int));
+
+            /*cudaMemcpy(temp->a, addV1->a + j * oBits * n, oBits * n * sizeof(int), D2D);
+            memcpy(temp->b, addV1->b + j * oBits, oBits * sizeof(int));
+            testCipher("0 ", temp, oBits, bk, key);*/
+        } else {
+            cudaMemcpy(addV2->a + j * oBits * n, iResult[i]->a, oBits * n * sizeof(int), D2D);
+            memcpy(addV2->b + j * oBits, iResult[i]->b, oBits * sizeof(int));
+
+            /*cudaMemcpy(temp->a, addV2->a + j * oBits * n, oBits * n * sizeof(int), D2D);
+            memcpy(temp->b, addV2->b + j * oBits, oBits * sizeof(int));
+            testCipher("1 ", temp, oBits, bk, key);*/
+        }
+
+        freeLweSample_16_gpu(iResult[i]);
     }
-    for (int i = 0; i < row * col; ++i) {
-        cudaMemcpy(temp->a, matMulRes->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(temp->b, matMulRes->b + i * nOutputBits, nOutputBits * sizeof(int));
-        memcpy(temp->current_variance, matMulRes->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
-        testCipher("mat mul test int ", temp, nOutputBits, bk, key);
 
+    taskLevelParallelAdd_bitwise_vector_coalInput(iResCoal, addV1, addV2,
+                                                  vLength / 2, oBits, 1,
+                                                  bk, cudaBkFFTCoalesceExt,
+                                                  ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+
+    for (vLength /= 2; vLength > row * col; vLength /= 2) {
+        for (int i = 0; i < vLength; ++i) {
+            int j = i / 2;
+            if(i % 2 == 0) {
+                cudaMemcpy(addV1->a + j * oBits * n, iResCoal->a + i * oBits * n, oBits * n * sizeof(int), D2D);
+                memcpy(addV1->b + j * oBits, iResCoal->b + i * oBits, oBits * sizeof(int));
+
+                /*cudaMemcpy(temp->a, addV1->a + j * oBits * n, oBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
+                memcpy(temp->b, addV1->b + j * oBits, oBits * sizeof(int));
+                testCipher("0 ", temp, oBits, bk, key);*/
+            } else {
+                cudaMemcpy(addV2->a + j * oBits * n, iResCoal->a + i * oBits * n, oBits * n * sizeof(int), D2D);
+                memcpy(addV2->b + j * oBits, iResCoal->b + i * oBits, oBits * sizeof(int));
+
+                /*cudaMemcpy(temp->a, addV2->a + j * oBits * n, oBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
+                memcpy(temp->b, addV2->b + j * oBits, oBits * sizeof(int));
+                testCipher("1 ", temp, oBits, bk, key);*/
+            }
+        }
+
+        taskLevelParallelAdd_bitwise_vector_coalInput(iResCoal, addV1, addV2,
+                                                      vLength / 2, oBits, 1,
+                                                      bk, cudaBkFFTCoalesceExt,
+                                                      ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+//        cout << endl;
     }
 
+    /*for (int i = 0; i < row * col; ++i) {
+        cudaMemcpy(temp->a, iResCoal->a + i * oBits * n, oBits * n * sizeof(int), D2D);
+        memcpy(temp->b, iResCoal->b + i * oBits, oBits * sizeof(int));
+        testCipher("iR", temp, oBits, bk, key);
+    }*/
 
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            cudaMemcpy(result[i][j]->a, iResCoal->a + (i * col + j) * oBits * n, oBits * n * sizeof(Torus32), D2D);
+            memcpy(result[i][j]->b, iResCoal->b + (i * col + j) * oBits, oBits * sizeof(int));
+        }
+    }
+
+    delete [] leftMat;
+    delete [] rightMat;
+    delete [] iResult;
+    freeLweSample_16_gpu(addV1);
+    freeLweSample_16_gpu(addV2);
+    freeLweSample_16_gpu(iResCoal);
+}
+
+void testMatrixMultiplication(LweSample *ca, LweSample *cb, int nBits,
+                        const TFheGateBootstrappingCloudKeySet *bk,
+                        cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                        Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                        TFheGateBootstrappingSecretKeySet *key) {
+    bool isDoublePrecision = false;
+    const int n = 500, iBits = nBits, oBits = isDoublePrecision ? nBits * 2 : nBits;
+    const int row = 4, col = 4;
+
+    //construct matrices
+    LweSample_16 ***m1 = new LweSample_16**[row];
+    LweSample_16 ***m2 = new LweSample_16**[row];
+    LweSample_16 ***mulResult = new LweSample_16**[row];
+    for (int i = 0; i < row ; ++i) {
+        m1[i] = new LweSample_16*[col];
+        m2[i] = new LweSample_16*[col];
+        mulResult[i] = new LweSample_16*[col];
+        for (int j = 0; j < col; ++j) {
+            m1[i][j] = convertBitToNumber(ca, iBits, bk);
+            m2[i][j] = convertBitToNumber(cb, iBits, bk);
+            mulResult[i][j] = convertBitToNumberZero_GPU(oBits, bk);
+
+            int *temp;
+            temp = m1[i][j]->a;
+            cudaMalloc(&(m1[i][j]->a), iBits * n * sizeof(int));
+            cudaMemcpy(m1[i][j]->a, temp, iBits * n * sizeof(int), H2D);
+            free(temp);
+
+            temp = m2[i][j]->a;
+            cudaMalloc(&(m2[i][j]->a), iBits * n * sizeof(int));
+            cudaMemcpy(m2[i][j]->a, temp, iBits * n * sizeof(int), H2D);
+            free(temp);
+
+            int x = i * col + j;
+            if (x > 0 && x < iBits) {
+//                leftShiftCuda_16_vector(m1[i][j], m1[0][0], 1, iBits, x, bk);
+//                leftShiftCuda_16_vector(m2[i][j], m2[0][0], 1, iBits, x, bk);
+            }
+
+            cout << "i: " << i << " j: " << j << endl;
+            testCipher("m1", m1[i][j], iBits, bk, key);
+            testCipher("m2", m2[i][j], iBits, bk, key);
+        }
+    }
+    cout << "Matrix Multiplication" << endl;
+    double sT = omp_get_wtime();
+    BOOTS_matrixMultiplication(mulResult, m1, m2,
+                         row, col, nBits, isDoublePrecision,
+                         bk, cudaBkFFTCoalesceExt,
+                         ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    cout << "row: " << row << " col: " << col << " Time taken: " << omp_get_wtime() - sT << endl;
+
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            testCipher("res", mulResult[i][j], nBits, bk, key);
+        }
+    }
+    //free memory
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            freeLweSample_16_gpu(m1[i][j]);
+            freeLweSample_16_gpu(m2[i][j]);
+            freeLweSample_16_gpu(mulResult[i][j]);
+        }
+    }
 }
 
 void upRotateMatrix(LweSample_16 ***matrix, int row, int col) {
@@ -2742,143 +2956,142 @@ LweSample_16** vectorFromMatrix_rowMajor(LweSample_16 ***matrix, int row, int co
     return vector;
 }
 
-
-void cannonsAlgoComp(LweSample_16 ***res, LweSample_16 ***matA, LweSample_16 ***matB, int bitSize, int row, int col,
-                     const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex ***cudaBkFFTCoalesce,
+void BOOTS_CannonsAlgo(LweSample_16 ***mResult, LweSample_16 ***mA, LweSample_16 ***mB,
+                     int row, int col, int nBits, bool isDoublePrecision,
+                     const TFheGateBootstrappingCloudKeySet *bk, cufftDoubleComplex *cudaBkFFTCoalesceExt,
                      Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
-                     double *ks_cv_gpu_extendedPtr, TFheGateBootstrappingSecretKeySet *key) {
+                     TFheGateBootstrappingSecretKeySet *key) {
 
-    int resBitSize = bitSize * 2, nElem = row * col;
-    const int n = bk->params->in_out_params->n;
+    const int n = 500, iBits = nBits, oBits = isDoublePrecision ? nBits * 2: nBits, nElem = row * col;
+
+    LweSample_16 **vRes = vectorFromMatrix_rowMajor(mResult, row, col, bk);
+    //temps
+    LweSample_16 **tempV1 = new LweSample_16*[row * col];
+    LweSample_16 *temp = convertBitToNumberZero_GPU(oBits, bk);
+
     for (int i = 0; i < row; i++) {
         for (int j = 0; j < i; j++) {
-            leftRotateVec(matA[i], row);
-            upRotateVec(matB, row, i);
+            leftRotateVec(mA[i], row);
+            upRotateVec(mB, row, i);
         }
     }
-
-    LweSample_16 **vecRes = vectorFromMatrix_rowMajor(res, row, col, bk);
-    //temps
-    LweSample_16 *tempV1 = convertBitToNumberZero_GPU(nElem * resBitSize, bk);
-    LweSample_16 *temp = convertBitToNumberZero_GPU(resBitSize, bk);
+    //vRes = 0
+    for (int i = 0; i < row * col; ++i) {
+        tempV1[i] = convertBitToNumberZero_GPU(oBits, bk);
+    }
 
     for (int k = 0; k < row; ++k) {
-        LweSample_16 **vecA = vectorFromMatrix_rowMajor(matA, row, col, bk);
-        LweSample_16 **vecB = vectorFromMatrix_rowMajor(matB, row, col, bk);
+        LweSample_16 **vecA = vectorFromMatrix_rowMajor(mA, row, col, bk);
+        LweSample_16 **vecB = vectorFromMatrix_rowMajor(mB, row, col, bk);
 
-        LweSample_16 *vecMulRes = convertBitToNumberZero_GPU(nElem * resBitSize, bk);
-        concurrentMultiplication(vecMulRes, vecA, vecB, nElem, bitSize, bk, NULL, cudaBkFFTCoalesce,
-                                 NULL, NULL, NULL, NULL,
-                                 ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr, key);
         if (k == 0) {
-            cudaMemcpy(tempV1->a, vecMulRes->a, nElem * resBitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-            memcpy(tempV1->b, vecMulRes->b, nElem * resBitSize * sizeof(int));
+            BOOTS_vectorMultiplication(vRes, vecA, vecB,
+                                       nElem, iBits, isDoublePrecision,
+                                       bk, cudaBkFFTCoalesceExt,
+                                       ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
         } else {
-            taskLevelParallelAdd_bitwise_vector(tempV1, tempV1, vecMulRes, nElem, resBitSize, 1, bk, NULL, cudaBkFFTCoalesce,
-                                                NULL, NULL, NULL, NULL, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr,
-                                                ks_cv_gpu_extendedPtr, key);
+            BOOTS_vectorMultiplication(tempV1, vecA, vecB,
+                                       nElem, iBits, isDoublePrecision,
+                                       bk, cudaBkFFTCoalesceExt,
+                                       ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+            BOOTS_vectorAddition(vRes, vRes, tempV1, 1, nElem, oBits, bk, cudaBkFFTCoalesceExt,
+                                 ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
         }
-        for (int i = 0; i < nElem; ++i) {
-            cudaMemcpy(temp->a, vecMulRes->a + i * resBitSize * n, resBitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-            memcpy(temp->b, vecMulRes->b + i * resBitSize, resBitSize * sizeof(int));
-            testCipher("v1", temp, resBitSize, bk, key);
-        }
-        leftRotateMatrix(matA, row, col);
-        upRotateMatrix(matB, row, col);
-    }
+        leftRotateMatrix(mA, row, col);
+        upRotateMatrix(mB, row, col);
 
-    for (int i = 0; i < nElem; ++i) {
-        cudaMemcpy(vecRes[i]->a, tempV1->a + i * resBitSize * n, resBitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
-        memcpy(vecRes[i]->b, tempV1->b + i * resBitSize, resBitSize * sizeof(int));
+        delete [] vecA;
+        delete [] vecB;
     }
-    printMatrix(res, resBitSize, row,col, bk, key);
+    //free memory
+    for (int i = 0; i < row * col; ++i) {
+        freeLweSample_16_gpu(tempV1[i]);
+    }
+    freeLweSample_16_gpu(temp);
+    delete [] tempV1;
+    delete [] vRes;
 }
 
+void testCannonsAlgo(LweSample *ca, LweSample *cb, int nBits,
+                             const TFheGateBootstrappingCloudKeySet *bk,
+                             cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                             Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                             TFheGateBootstrappingSecretKeySet *key) {
+    bool isDoublePrecision = false;
+    const int n = 500, iBits = nBits, oBits = isDoublePrecision ? nBits * 2 : nBits;
+    const int row = 5, col = 5;
 
-
-void cannonsAlgoPreparations(LweSample *ca, LweSample *cb, int bitSize,
-                         const TFheGateBootstrappingCloudKeySet *bk,
-                         TFheGateBootstrappingSecretKeySet *key) {
-    const int n = bk->bk->in_out_params->n;
-
-    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(1, bk);
-    const LweParams *in_out_params = bk->params->in_out_params;
-
-    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, bk);
-    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(bk);
-    double *ks_cv_gpu_extendedPtr = sendKeySwitchCVtoGPUOnePtr(bk);
-
-    int row = 2, col = 2;
-    //construct m1 m2
-    LweSample_16 ***matA = new LweSample_16**[row];
-    LweSample_16 ***matB = new LweSample_16**[row];
-    LweSample_16 ***res = new LweSample_16**[row];
+    //construct matrices
+    LweSample_16 ***m1 = new LweSample_16**[row];
+    LweSample_16 ***m2 = new LweSample_16**[row];
+    LweSample_16 ***mulResult = new LweSample_16**[row];
     for (int i = 0; i < row ; ++i) {
-        matA[i] = new LweSample_16*[col];
-        matB[i] = new LweSample_16*[col];
-        res[i] = new LweSample_16*[col];
+        m1[i] = new LweSample_16*[col];
+        m2[i] = new LweSample_16*[col];
+        mulResult[i] = new LweSample_16*[col];
         for (int j = 0; j < col; ++j) {
-            matA[i][j] = convertBitToNumber(ca, bitSize, bk);
-            matB[i][j] = convertBitToNumber(cb, bitSize, bk);
-            res[i][j] = convertBitToNumberZero_GPU(bitSize * 2, bk); // result bit size is twice of bitsize
+            m1[i][j] = convertBitToNumber(ca, iBits, bk);
+            m2[i][j] = convertBitToNumber(cb, iBits, bk);
+            mulResult[i][j] = convertBitToNumberZero_GPU(oBits, bk);
 
             int *temp;
-            temp = matA[i][j]->a;
-            cudaMalloc(&(matA[i][j]->a), bitSize * n * sizeof(int));
-            cudaMemcpy(matA[i][j]->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+            temp = m1[i][j]->a;
+            cudaMalloc(&(m1[i][j]->a), iBits * n * sizeof(int));
+            cudaMemcpy(m1[i][j]->a, temp, iBits * n * sizeof(int), H2D);
             free(temp);
 
-            temp = matB[i][j]->a;
-            cudaMalloc(&(matB[i][j]->a), bitSize * n * sizeof(int));
-            cudaMemcpy(matB[i][j]->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+            temp = m2[i][j]->a;
+            cudaMalloc(&(m2[i][j]->a), iBits * n * sizeof(int));
+            cudaMemcpy(m2[i][j]->a, temp, iBits * n * sizeof(int), H2D);
             free(temp);
 
 //            int x = i * col + j;
-//            if (x > 0 && x < bitSize) {
-//                leftShiftCuda_16_vector(matA[i][j], matA[0][0], 1, bitSize, x, bk);
-//                leftShiftCuda_16_vector(matB[i][j], matB[0][0], 1, bitSize, x, bk);
+//            if (x > 0 && x < iBits) {
+//                leftShiftCuda_16_vector(m1[i][j], m1[0][0], 1, iBits, x, bk);
+//                leftShiftCuda_16_vector(m2[i][j], m2[0][0], 1, iBits, x, bk);
 //            }
 
-//            cout << "i: " << i << " j: " << j << endl;
-//            testCipher("m1", matA[i][j], bitSize, bk, key);
-//            testCipher("m2", matB[i][j], bitSize, bk, key);
-//            testCipher("res", res[i][j], bitSize, bk, key);
-//            cout << endl;
+            cout << "i: " << i << " j: " << j << endl;
+            testCipher("m1", m1[i][j], iBits, bk, key);
+            testCipher("m2", m2[i][j], iBits, bk, key);
         }
-        cout << endl;
     }
+    cout << "Cannon's Matrix Multiplication" << endl;
     double sT = omp_get_wtime();
-    cannonsAlgoComp(res, matA, matB, bitSize, row, col, bk, cudaBkFFTCoalesce, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr,
-                    ks_cv_gpu_extendedPtr, key);
-    cout << "time taken: " << omp_get_wtime() - sT  << endl;
-    //construct vector from matrix
-//    for (int i = 0; i < row * col; ++i) {
-//        cudaMemcpy(temp->a, matMulRes->a + i * nOutputBits * n, nOutputBits * n * sizeof(int), cudaMemcpyDeviceToDevice);
-//        memcpy(temp->b, matMulRes->b + i * nOutputBits, nOutputBits * sizeof(int));
-//        memcpy(temp->current_variance, matMulRes->current_variance + i * nOutputBits, nOutputBits * sizeof(double));
-//        testCipher("mat mul test int ", temp, nOutputBits, bk, key);
-//
-//    }
+    BOOTS_CannonsAlgo(mulResult, m1, m2,
+                    row, col, nBits, isDoublePrecision,
+                    bk, cudaBkFFTCoalesceExt,
+                    ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    cout << "row: " << row << " col: " << col << " Time taken: " << omp_get_wtime() - sT << endl;
 
-
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            testCipher("res", mulResult[i][j], nBits, bk, key);
+        }
+    }
+    //free memory
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            freeLweSample_16_gpu(m1[i][j]);
+            freeLweSample_16_gpu(m2[i][j]);
+            freeLweSample_16_gpu(mulResult[i][j]);
+        }
+    }
 }
 
-
 void testMUXopertion(LweSample *ca, LweSample *cb, int bitSize,
-                         const TFheGateBootstrappingCloudKeySet *bk,
-                         TFheGateBootstrappingSecretKeySet *key) {
+                     const TFheGateBootstrappingCloudKeySet *bk,
+                     cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                     Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                     TFheGateBootstrappingSecretKeySet *key) {
 
     const int n = bk->bk->in_out_params->n;
-    cufftDoubleComplex ****cudaBkFFT = NULL;
-    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(1, bk);
-    Torus32 ****ks_a_gpu_extended = NULL;
-
-    int ***ks_b_gpu = NULL;
-    double ***ks_cv_gpu = NULL;
     const LweParams *in_out_params = bk->params->in_out_params;
-    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, bk);
 
-    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(bk);
+//    cufftDoubleComplex *cudaBkFFTCoalesceExt = sendBootstrappingKeyToGPUCoalesceExt(bk);
+    cufftDoubleComplex ***cudaBkFFTCoalesce = sendBootstrappingKeyToGPUCoalesce(1, bk);
+//    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, bk);
+//    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(bk);
     double *ks_cv_gpu_extendedPtr = sendKeySwitchCVtoGPUOnePtr(bk);
 
     LweSample_16 *a = convertBitToNumber(ca, bitSize, bk);
@@ -2898,14 +3111,285 @@ void testMUXopertion(LweSample *ca, LweSample *cb, int bitSize,
     testCipher("a (MUX test)", a, bitSize, bk, key);
     testCipher("b (MUX test)", b, bitSize, bk, key);
 
+
+
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+
+
     LweSample_16 * result = convertBitToNumberZero_GPU(bitSize, bk);
-    cudaMemset(result->a, 0, sizeof(int) * bitSize * n);
-    bootsMUX_16_vector(result, a, result, b, 1, bitSize, bk, cudaBkFFT, cudaBkFFTCoalesce, NULL, ks_a_gpu_extended,
-                       ks_b_gpu, ks_cv_gpu, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
-    testCipher("result(MUX)", result, bitSize, bk, key);
+    LweSample_16 * result1 = convertBitToNumberZero_GPU(bitSize, bk);
+    for (int i = 0; i < 10; ++i) {
+        cout << "i: " << i << endl;
+//        cudaMemset(result->a, 0, bitSize * 500 * sizeof(int));
+//        for (int i = 0; i < bitSize; ++i) result->b[i] = -MU;
+//        testCipher("result(MUX) before: ", result, bitSize, bk, key);
+//        bootsMUX_16_vector(result, a, result, b, 1, bitSize, bk, NULL, cudaBkFFTCoalesce, NULL, NULL,
+//                           NULL, NULL, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, ks_cv_gpu_extendedPtr);
+//        testCipher("result(MUX) after: ", result, bitSize, bk, key);
 
-
+        cudaMemset(result1->a, 0, bitSize * 500 * sizeof(int));
+        for (int j = 0; j < bitSize; ++j) result1->b[j] = -MU;
+        testCipher("result(MUX) before: ", result1, bitSize, bk, key);
+        bootsMUX_fullGPU_n_Bit(result1, a, result1, b, bitSize, cudaBkFFTCoalesceExt, ks_a_gpu_extendedPtr,
+                               ks_b_gpu_extendedPtr);
+        testCipher("result(MUX) after: ", result1, bitSize, bk, key);
+    }
 }
+
+void getMin(LweSample_16 *result, LweSample_16 *a, LweSample_16 *b, int bitSize,
+                 const TFheGateBootstrappingCloudKeySet *bk,
+                 cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                 Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                 TFheGateBootstrappingSecretKeySet *key) {
+    const int n = 500;
+    //temp
+    LweSample_16 *tmp1 = convertBitToNumberZero_GPU(bitSize, bk);
+    LweSample_16 *tmp0 = convertBitToNumberZero_GPU(1, bk);
+    LweSample_16 *tmp0Compl = convertBitToNumberZero_GPU(1, bk);
+    //pointers
+    LweSample_16 *ai = new LweSample_16;
+    LweSample_16 *tmp1i = new LweSample_16;
+    //tmp0 = 0
+    cudaMemset(tmp0->a, 0, n * sizeof(int) * 1);
+
+    bootsXNOR_fullGPU_n_Bit(tmp1, a, b, bitSize, cudaBkFFTCoalesceExt, ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    for (int i = 0; i < bitSize; ++i) {
+        ai->a = a->a + n * i;
+        ai->b = a->b + i;
+
+        tmp1i->a = tmp1->a + n * i;
+        tmp1i->b = tmp1->b + i;
+        /*testCipher("tmp1", tmp1i, 1, bk, key);
+        testCipher("tmp0", tmp0, 1, bk, key);
+        testCipher("ai", ai, 1, bk, key);*/
+        bootsMUX_fullGPU_n_Bit(tmp0, tmp1i, tmp0, ai, 1, cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+    }
+    //Caution: DO NOT CHNAGE tmp1i as it points to the sign bit
+    bootsNOT_16(tmp0Compl, tmp0, 1, n);
+    bootsMUX_fullGPU_n_Bit(tmp0, tmp1i, tmp0, tmp0Compl, 1, cudaBkFFTCoalesceExt,
+                           ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    //expand tmp0 to number of bits in tmp1
+    for (int i = 0; i < bitSize; ++i) {
+        tmp1i->a = tmp1->a + n * i;
+        tmp1i->b = tmp1->b + i;
+        cudaMemcpy(tmp1i->a, tmp0->a, n * sizeof(int), D2D);
+        memcpy(tmp1i->b, tmp0->b, sizeof(int));
+    }
+
+    bootsMUX_fullGPU_n_Bit(result, tmp1, b, a, bitSize, cudaBkFFTCoalesceExt,
+                           ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+    //free memory
+    freeLweSample_16_gpu(tmp0);
+    freeLweSample_16_gpu(tmp0Compl);
+    freeLweSample_16_gpu(tmp1);
+    delete tmp1i;
+    delete ai;
+}
+
+void getMin_test(LweSample *ca, LweSample *cb, int bitSize,
+                     const TFheGateBootstrappingCloudKeySet *bk,
+                     cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                     Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                     TFheGateBootstrappingSecretKeySet *key) {
+
+    const int n = 500;
+    static const Torus32 MU = modSwitchToTorus32(1, 8);
+    const LweParams *in_out_params = bk->params->in_out_params;
+
+    LweSample_16 *a = convertBitToNumber(ca, bitSize, bk);
+    LweSample_16 *b = convertBitToNumber(cb, bitSize, bk);
+    LweSample_16 *result = convertBitToNumberZero_GPU(bitSize, bk);
+
+    cout << "--- prepare data ---" << endl;
+    int *temp;
+    temp = a->a;
+    cudaMalloc(&(a->a), bitSize * n * sizeof(int));
+    cudaMemcpy(a->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+    free(temp);
+    temp = b->a;
+    cudaMalloc(&(b->a), bitSize * n * sizeof(int));
+    cudaMemcpy(b->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+    free(temp);
+
+    getMin(result, a, b, bitSize, bk, cudaBkFFTCoalesceExt,
+           ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+
+    testCipher("a (MIN test)", a, bitSize, bk, key);
+    testCipher("b (MIN test)", b, bitSize, bk, key);
+    testCipher("result (MIN test)", result, bitSize, bk, key);
+
+    //free memory
+    cudaFree(a->a);
+    cudaFree(b->a);
+    cudaFree(result->a);
+}
+
+void getMinVector(LweSample_16 *result, LweSample_16 **input, int vLength, int nBits,
+            const TFheGateBootstrappingCloudKeySet *bk,
+            cufftDoubleComplex *cudaBkFFTCoalesceExt,
+            Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+            TFheGateBootstrappingSecretKeySet *key) {
+    const int n = 500;
+    int halfVLength = vLength / 2;
+    int nTotalBits = nBits * halfVLength;
+
+    //prepare input pointers
+//    LweSample_16 **inputA = new LweSample_16*[halfVLength];
+//    LweSample_16 **inputB = new LweSample_16*[halfVLength];
+    LweSample_16 **iResults = new LweSample_16*[halfVLength];
+    for (int i = 0; i < halfVLength; ++i) {
+        iResults[i] = new LweSample_16;
+    }
+    //prepare input coalescing pointers
+    LweSample_16 *inputCoalA = convertBitToNumberZero_GPU(nTotalBits, bk);
+    LweSample_16 *inputCoalB = convertBitToNumberZero_GPU(nTotalBits, bk);
+    LweSample_16 *coalResult = convertBitToNumberZero_GPU(nTotalBits, bk);
+
+    //temps
+    LweSample_16 *tmp1 = convertBitToNumberZero_GPU(nTotalBits, bk);
+    LweSample_16 *tmp0 = convertBitToNumberZero_GPU(halfVLength, bk);
+    LweSample_16 *tmp0Compl = convertBitToNumberZero_GPU(halfVLength, bk);
+
+    //pointers to each vectors
+    LweSample_16 *ai = convertBitToNumberZero_GPU(halfVLength, bk);
+    LweSample_16 *tmp1i = convertBitToNumberZero_GPU(halfVLength, bk);
+    //tmp0 = 0
+    cudaMemset(tmp0->a, 0, halfVLength * n * sizeof(int));
+
+    //test var
+//    LweSample_16 *valTester = convertBitToNumberZero_GPU(nBits, bk);
+//    LweSample_16 *valTester_oneBit = convertBitToNumberZero_GPU(1, bk);
+
+    for (; halfVLength > 0; halfVLength /= 2, input = iResults, nTotalBits = nBits * halfVLength) {
+//        cout << "-------------------" << endl;
+//        cout << "halfVLength: " << halfVLength << endl;
+        for (int i = 0; i < halfVLength; ++i) {
+            //divide into two pointers
+//            inputA[i] = input[i];
+//            inputB[i] = input[i + halfVLength];
+            //convert A and B into two different Cipher texts and put together the inputs
+            cudaMemcpy(inputCoalA->a + i * nBits * n, input[i]->a, n * nBits * sizeof(Torus32), D2D);
+            memcpy(inputCoalA->b + i * nBits, input[i]->b, nBits * sizeof(int));
+
+            cudaMemcpy(inputCoalB->a + i * nBits * n, input[i + halfVLength]->a, n * nBits * sizeof(Torus32), D2D);
+            memcpy(inputCoalB->b + i * nBits, input[i + halfVLength]->b, nBits * sizeof(int));
+        }
+
+        bootsXNOR_fullGPU_n_Bit(tmp1, inputCoalA, inputCoalB, nTotalBits, cudaBkFFTCoalesceExt,
+                                ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+        for (int i = 0; i < nBits; ++i) {
+            for (int j = 0; j < halfVLength; ++j) {
+                //get ai
+                cudaMemcpy(ai->a + j * n, inputCoalA->a + j * nBits * n + i * n, n * sizeof(int), D2D);
+                memcpy(ai->b + j, inputCoalA->b + j * nBits + i, sizeof(int));
+                //get tmp1i
+                cudaMemcpy(tmp1i->a + j * n, tmp1->a + j * nBits * n + i * n, n * sizeof(int), D2D);
+                memcpy(tmp1i->b + j, tmp1->b + j * nBits + i, sizeof(int));
+            }
+            bootsMUX_fullGPU_n_Bit(tmp0, tmp1i, tmp0, ai, halfVLength, cudaBkFFTCoalesceExt,
+                                   ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+        }
+        //Caution: DO NOT CHNAGE tmp1i as it points to the sign bits
+        bootsNOT_16(tmp0Compl, tmp0, halfVLength, n);
+        bootsMUX_fullGPU_n_Bit(tmp0, tmp1i, tmp0, tmp0Compl, halfVLength, cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+        //expand tmp0 to tmp1
+        for (int i = 0; i < halfVLength; ++i) {
+            for (int j = 0; j < nBits; ++j) {
+                cudaMemcpy(tmp1->a + i * nBits * n + j * n, tmp0->a + i * n, n * sizeof(Torus32), D2D);
+                memcpy(tmp1->b + i * nBits + j, tmp0->b + i, sizeof(int));
+            }
+        }
+
+        bootsMUX_fullGPU_n_Bit(coalResult, tmp1, inputCoalB, inputCoalA, nTotalBits, cudaBkFFTCoalesceExt,
+                               ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+        for (int i = 0; i < halfVLength; ++i) {
+//            cudaMemcpy(valTester->a, coalResult->a + i * nBits * n, n * nBits * sizeof(Torus32), D2D);
+//            memcpy(valTester->b, coalResult->b + i * nBits, nBits * sizeof(int));
+//            testCipher("output", valTester, nBits, bk, key);
+            iResults[i]->a = coalResult->a + i * nBits * n;
+            iResults[i]->b = coalResult->b + i * nBits;
+        }
+    }
+
+    cudaMemcpy(result->a, coalResult->a, n * nBits * sizeof(Torus32), D2D);
+    memcpy(result->b, coalResult->b, nBits * sizeof(int));
+
+
+    //free memory
+    freeLweSample_16_gpu(inputCoalA);
+    freeLweSample_16_gpu(inputCoalB);
+    freeLweSample_16_gpu(coalResult);
+    freeLweSample_16_gpu(ai);
+    freeLweSample_16_gpu(tmp0);
+    freeLweSample_16_gpu(tmp1);
+    freeLweSample_16_gpu(tmp1i);
+    delete[] iResults;
+}
+
+void getMinVector_test(LweSample *ca, LweSample *cb, int bitSize,
+                 const TFheGateBootstrappingCloudKeySet *bk,
+                 cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                 Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr,
+                 TFheGateBootstrappingSecretKeySet *key) {
+
+
+    const int n = 500;
+    LweSample_16 *a = convertBitToNumber(ca, bitSize, bk);
+    LweSample_16 *b = convertBitToNumber(cb, bitSize, bk);
+
+    int *temp;
+    temp = a->a;
+    cudaMalloc(&(a->a), bitSize * n * sizeof(int));
+    cudaMemcpy(a->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+    free(temp);
+
+    temp = b->a;
+    cudaMalloc(&(b->a), bitSize * n * sizeof(int));
+    cudaMemcpy(b->a, temp, bitSize * n * sizeof(int), cudaMemcpyHostToDevice);
+    free(temp);
+
+
+    cout << "---prepare vector data---" << endl;
+    int vLength = 16;
+    LweSample_16 **input = new LweSample_16*[vLength];
+    LweSample_16 *result = convertBitToNumberZero_GPU(bitSize, bk);//new LweSample_16*[vLength / 2];
+    for (int i = 0; i < vLength/2; ++i) {
+        input[i] = convertBitToNumberZero_GPU(bitSize, bk);
+        leftShiftCuda_16(input[i], a, bitSize, i % 10, bk);
+//        cudaMemcpy(input[i]->a, a->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
+//        memcpy(input[i]->b, a->b, bitSize * sizeof(int));
+        testCipher("input1:", input[i], bitSize, bk, key);
+
+        int j = i + vLength/2;
+        input[j] = convertBitToNumberZero_GPU(bitSize, bk);
+        leftShiftCuda_16(input[j], b, bitSize, i % 10, bk);
+//        cudaMemcpy(input[j]->a, b->a, bitSize * n * sizeof(int), cudaMemcpyDeviceToDevice);
+//        memcpy(input[j]->b, b->b, bitSize * sizeof(int));
+        testCipher("input2:", input[j], bitSize, bk, key);
+    }
+    //get min vector
+    getMinVector(result, input, vLength, bitSize, bk, cudaBkFFTCoalesceExt,
+                 ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    testCipher("Final output", result, bitSize, bk, key);
+
+    //free memory
+    for (int i = 0; i < vLength / 2; ++i) {
+        cudaFree(input[i]->a);
+        cudaFree(input[i + vLength/2]->a);
+    }
+
+    freeLweSample_16_gpu(a);
+    freeLweSample_16_gpu(b);
+    freeLweSample_16_gpu(result);
+}
+
+
 
 int main(int argc, char *argv[]) {
     if (argc != 4) {
@@ -2954,22 +3438,44 @@ int main(int argc, char *argv[]) {
 //    cout << endl;
 //    cout << prop.multiProcessorCount << endl;//20
 
-    test_AND_XOR_CompoundGate_Addition(a.data, b.data, bitSize, &key->cloud, key);
-//    test_vectorAddition(a.data, b.data, bitSize, &key->cloud, key);
-//    multiplyLweSamples_test(a.data, b.data, bitSize, &key->cloud, key);
-//    karatSuba_test(a.data, b.data, bitSize, &key->cloud, key);
+    //send all keys to GPU
+    cudaDeviceReset();
 
-//    vectorMultiplicationTest(a.data, b.data, bitSize, 4, &key->cloud, key);
+    cufftDoubleComplex *cudaBkFFTCoalesceExt = sendBootstrappingKeyToGPUCoalesceExt(&key->cloud);
+    Torus32 *ks_a_gpu_extendedPtr = sendKeySwitchKeyToGPU_extendedOnePointer(1, &key->cloud);//bk);
+    Torus32 *ks_b_gpu_extendedPtr = sendKeySwitchBtoGPUOnePtr(&key->cloud);//(bk);
+//    double *ks_cv_gpu_extendedPtr = sendKeySwitchCVtoGPUOnePtr(bk);
 
-//    testMatrixOperation(a.data, b.data, bitSize, &key->cloud, key);
-//    cannonsAlgoPreparations(a.data, b.data, bitSize, &key->cloud, key);
-//    testMUXopertion(a.data, b.data, bitSize, &key->cloud, key);
+    test_AND_XOR_CompoundGate_Addition(a.data, b.data, bitSize, &key->cloud, cudaBkFFTCoalesceExt,
+                                       ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    test_vectorAddition(a.data, b.data, bitSize, &key->cloud, cudaBkFFTCoalesceExt,
+                        ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    multiplyLweSamples_test(a.data, b.data, bitSize, &key->cloud, cudaBkFFTCoalesceExt,
+                        ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    vectorMultiplicationTest(a.data, b.data, bitSize, &key->cloud, cudaBkFFTCoalesceExt,
+                             ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    karatSuba_test(a.data, b.data, bitSize, &key->cloud, cudaBkFFTCoalesceExt,
+                             ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
 
+    testMatrixAddition(a.data, b.data, bitSize, &key->cloud, cudaBkFFTCoalesceExt,
+                             ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    testMatrixMultiplication(a.data, b.data, bitSize, &key->cloud, cudaBkFFTCoalesceExt,
+                       ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    testCannonsAlgo(a.data, b.data, bitSize, &key->cloud, cudaBkFFTCoalesceExt,
+                            ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
 
+    testMUXopertion(a.data, b.data, bitSize, &key->cloud,
+                    cudaBkFFTCoalesceExt,
+                    ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
+    getMin_test(a.data, b.data, bitSize, &key->cloud,
+           cudaBkFFTCoalesceExt,
+           ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
 
+    getMinVector_test(a.data, b.data, bitSize, &key->cloud,
+           cudaBkFFTCoalesceExt,
+           ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr, key);
 
-
-
+    cudaDeviceReset();
     //clean up all pointers
     delete_gate_bootstrapping_ciphertext_array(bitSize, ciphertext2);
     delete_gate_bootstrapping_ciphertext_array(bitSize, ciphertext1);

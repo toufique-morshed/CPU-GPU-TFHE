@@ -160,6 +160,7 @@ EXPORT LweSample_16* convertBitToNumber(const LweSample* input, int bitSize, con
 EXPORT void freeLweSample_16(LweSample_16* input);
 
 EXPORT LweSample_16* newLweSample_16(int bitSize, const LweParams* params);
+EXPORT LweSample_16* newLweSample_n_Bit(int bitSize, const int nElem);
 EXPORT LweSample_16* newLweSample_16_2(int nOutputs, int bitSize, const LweParams* params);
 
 EXPORT LweSample* convertNumberToBits(LweSample_16* number, int bitSize, const TFheGateBootstrappingCloudKeySet *bk);
@@ -170,9 +171,31 @@ void bootsNOT_16(LweSample_16 *output, LweSample_16 *input, int bitSize, int par
 EXPORT void bootsAND_fullGPU_OneBit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
                                   cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
                                   Torus32 *ks_b_gpu_extendedPtr, double *ks_cv_gpu_extendedPtr);
-EXPORT void bootsAND_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
+EXPORT void bootsAND_fullGPU_1_Bit_Stream(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
                                   cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
-                                  Torus32 *ks_b_gpu_extendedPtr, double *ks_cv_gpu_extendedPtr);
+                                  Torus32 *ks_b_gpu_extendedPtr);
+EXPORT void bootsAND_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
+                                   cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
+                                   Torus32 *ks_b_gpu_extendedPtr);
+EXPORT void bootsXOR_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
+                                   cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
+                                   Torus32 *ks_b_gpu_extendedPtr);
+EXPORT void bootsXNOR_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb, int nBits,
+                                   cufftDoubleComplex *cudaBkFFTCoalesceExt, Torus32 *ks_a_gpu_extendedPtr,
+                                   Torus32 *ks_b_gpu_extendedPtr);
+EXPORT void bootsMUX_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb,
+                                   const LweSample_16 *cc, int nBits, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                   Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr);
+
+EXPORT void bootsANDXOR_fullGPU_n_Bit_vector(LweSample_16 *result, const LweSample_16 *ca, const LweSample_16 *cb,
+                                             const int vLength, const int nBits,
+                                             cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                             Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr);
+EXPORT void bootsXORXOR_fullGPU_n_Bit_vector(LweSample_16 *result,
+                                             const LweSample_16 *ca1, const LweSample_16 *ca2,
+                                             const LweSample_16 *cb1, const LweSample_16 *cb2,
+                                             const int vLength, const int nBits, cufftDoubleComplex *cudaBkFFTCoalesceExt,
+                                             Torus32 *ks_a_gpu_extendedPtr, Torus32 *ks_b_gpu_extendedPtr);
 
 
 
