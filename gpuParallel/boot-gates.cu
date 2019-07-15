@@ -15,6 +15,7 @@
 #include "tfhe.h"
 #include <fstream>
 #include <cstdint>
+#include <omp.h>
 
 
 using namespace std;
@@ -2581,6 +2582,18 @@ void bootstrapAndKeySwitch_n_Bit(LweSample_16* result, int *temp_res_a_gpu, int 
         cudaCheckErrors("HereInside7");
     }
 
+    //free cufft helper variables
+    cudaFree(d_rev_in);
+    cudaFree(d_rev_out);
+    cudaFree(d_in);
+    cudaFree(d_out);
+    cufftDestroy(rev_p);
+    cufftDestroy(p);
+    //free other mem
+    cudaFree(temp_accum_a_b);
+    cudaFree(bara);
+    cudaFree(barb);
+
     //extract
     int *u_a_GPU, *u_b_CPU, *temp_u_b;
     cudaMalloc(&u_a_GPU, nBits * N * sizeof(int));
@@ -2606,19 +2619,9 @@ void bootstrapAndKeySwitch_n_Bit(LweSample_16* result, int *temp_res_a_gpu, int 
     keySwitch_n_Bit(result, u_a_GPU, u_b_GPU, nBits,
                     ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);/**/
 
-    cudaFree(accum_a_b);
-    cudaFree(temp_accum_a_b);
-    cudaFree(bara);
-    cudaFree(barb);
 
-    //cufft helper variables
-    cudaFree(d_rev_in);
-    cudaFree(d_rev_out);
-    cudaFree(d_in);
-    cudaFree(d_out);
-    cufftDestroy(rev_p);
-    cufftDestroy(p);
     //KS vars
+    cudaFree(accum_a_b);
     cudaFree(u_a_GPU);
     delete [] u_b_CPU;
     delete [] temp_u_b;
@@ -2862,9 +2865,51 @@ EXPORT void bootsAND_fullGPU_n_Bit(LweSample_16 *result, const LweSample_16 *ca,
         temp_res_b_cpu[i] = ca->b[i] + cb->b[i] + AndConst;
 //        temp_res_b_cpu[i] = modSwitchFromTorus32(temp_res_b_cpu[i], _2N);
     }
-    bootstrapAndKeySwitch_n_Bit(result, temp_res_a_gpu, temp_res_b_cpu, nBits, cudaBkFFTCoalesceExt,
-                                ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
 
+    static const int N = 1024, k = 1, kpl = 4, _2N = 2048;
+    static const size_t memRequird_1_bit = N * (k + 1) * sizeof(int) + N * (k + 1) * sizeof(int)
+                                           + N * sizeof(int)
+                                           + sizeof(int)
+                                           + kpl * _2N * sizeof(cufftDoubleReal)
+                                           + kpl * (N + 1) * sizeof(cufftDoubleComplex)
+                                           + (k + 1) * (N + 1) * sizeof(cufftDoubleComplex)
+                                           + (k + 1) * _2N * sizeof(cufftDoubleReal);
+    size_t freeMem, totalMem;
+    cudaMemGetInfo(&freeMem, &totalMem);
+    freeMem = (freeMem - N * N * N) < 0 ? 0 : freeMem;
+
+    int bootsLimit = freeMem / memRequird_1_bit;
+    if (bootsLimit == 0) {
+        cout << "ERROR!! : memory out of bound" << endl;
+        exit(1);
+    }
+    bootsLimit = bootsLimit > 20000 ? 20000 : bootsLimit;
+    int nBatch = ceil((double)nBits / (double)bootsLimit);
+    /*cout << "nBits: " << nBits<< endl;
+    cout << "bootsLimit: " << bootsLimit << endl;
+    cout << "nBatch: " << nBatch << endl;*/
+
+    LweSample_16 *resultPtr = new LweSample_16;
+    int *temp_res_a_gpuPtr, *temp_res_b_cpuPtr;
+
+    for (int iBatch = 0; iBatch < nBatch; ++iBatch) {
+        int currentBits = iBatch == (nBatch - 1) ? (nBits - bootsLimit * iBatch) :  bootsLimit;
+        //set tmpLWE
+        resultPtr->a = result->a + iBatch * bootsLimit * n;
+        resultPtr->b = result->b + iBatch * bootsLimit;
+
+        temp_res_a_gpuPtr = temp_res_a_gpu + iBatch * bootsLimit * n;
+        temp_res_b_cpuPtr = temp_res_b_cpu + iBatch * bootsLimit;
+
+        bootstrapAndKeySwitch_n_Bit(resultPtr, temp_res_a_gpuPtr, temp_res_b_cpuPtr, currentBits, cudaBkFFTCoalesceExt,
+                                    ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    }
+
+//    bootstrapAndKeySwitch_n_Bit(result, temp_res_a_gpu, temp_res_b_cpu, nBits, cudaBkFFTCoalesceExt,
+//                                ks_a_gpu_extendedPtr, ks_b_gpu_extendedPtr);
+
+    delete resultPtr;
     delete [] temp_res_b_cpu;
     cudaFree(temp_res_a_gpu);
 }
