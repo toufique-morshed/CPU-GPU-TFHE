@@ -1,7 +1,7 @@
 ## Compile and Run instruction
 ### GPU parallel
 
- - Uncomment anyline from [3449](https://github.com/tmp1370/tmpProject/blob/master/gpuParallel/main.cu#L3449)-[3464](https://github.com/tmp1370/tmpProject/blob/master/gpuParallel/main.cu#L3464)
+ - Uncomment anyline from [2773](https://github.com/tmp1370/tmpProject/blob/master/gpuParallel/main.cu#L2773)-[2787](https://github.com/tmp1370/tmpProject/blob/master/gpuParallel/main.cu#L2787)
  - **Compile:** make main
  - **Run:** ./main \<number of bits> \<first number> \<second number>
 ### CPU parallel
