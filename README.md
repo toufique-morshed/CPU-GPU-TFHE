@@ -13,7 +13,7 @@
 
 
 # CPU and GPU Accelerated Fully Homomorphic Encryption
-The framework ports [TFHE](https://tfhe.github.io/tfhe/) implementation to GPU, and extends the gates computation to algebraic, vector, and matrix operations.
+This framework ports [TFHE](https://tfhe.github.io/tfhe/) implementation to GPU, and extends the gate computations to algebraic, vector, and matrix operations.
 
 Owners: Toufique Morshed, Md Momin Al Aziz, and Noman Mohammed
 
